@@ -1,0 +1,1784 @@
+'use strict';
+
+const { Plugin, PluginSettingTab, Setting, Notice, Modal, TFolder, normalizePath } = require('obsidian');
+const { execFile } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+
+const DEFAULT_SETTINGS = {
+  // where notes land
+  archiveRoot: 'Playlists',
+  tags: ['youtube-video'],
+  playlistTags: ['youtube-playlist'],
+
+  // Frontmatter order, as a plain list. A name not in the list is appended, and
+  // a name listed but not produced is skipped, so editing this can reorder or
+  // drop a property but cannot invent one.
+  videoNoteOrder: 'dl-ed, duration, url, banner, yt-playlist, channel, media, tags',
+  playlistNoteOrder: 'dl-all, count, url, topic, tags',
+  sources: [{ target: 'Watch Later', note: 'Watch Later', topics: '' }],
+
+  // what to fetch
+  transcript: true,
+  downloadThumbnails: true,
+  // Same choices as Obsidian's "Default location for new attachments".
+  thumbnailLocationMode: 'subfolder', // obsidian | vault | same | subfolder | specified
+  thumbnailSubfolder: 'Materials',
+  thumbnailFolder: '',
+  subtitleLangs: 'en.*',
+  transcriptParagraphSeconds: 25,
+  transcriptGapSeconds: 1.4,
+  noteNameTemplate: '{{channel}} \u2014 {{title}}',
+  descriptionMaxLines: 20,
+  descriptionMaxChars: 1200,
+
+  // media download
+  mediaLocationMode: 'subfolder', // vault | same | subfolder | specified
+  mediaSubfolder: 'Materials',
+  mediaFolder: '',
+  quality: 'bestvideo*+bestaudio/best',
+  audioFormat: 'mp3',
+  askDownloadMode: true,
+  downloadSubtitles: true,
+  keepOneSubtitle: true,
+  defaultDownloadMode: 'video_and_audio',
+
+  // external tools
+  ytDlpPath: 'yt-dlp',
+  ffmpegLocation: '',
+  cookiesFromBrowser: '',
+  cookiesFile: '',
+  jsRuntime: '',
+  ytDlpExtraArgs: '',
+
+  setupDone: false,
+};
+
+const CLIPPINGS_PLUGIN_DIRS = [
+  'arch-after-clipping',
+  'arch-web-clipper',
+  'arch-clipping',
+  'archive-clippings-plus',
+  'clip-archiver',
+];
+
+function splitList(raw) {
+  return String(raw || '')
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+module.exports = class YouTubeArchiver extends Plugin {
+  async onload() {
+    // Never use underscore-prefixed names here: Obsidian's Component base class
+    // owns _children, _events and _loaded, and clobbering _children with a Set
+    // breaks the plugin lifecycle before onload finishes.
+    this.ytProcs = new Set();
+    this.activeNotice = null;
+    this.aborted = false;
+
+    // Obsidian re-reads main.js on enable, but Node caches required modules by
+    // path. Without this, disabling and re-enabling after a lib/ update would
+    // silently keep running the previous code.
+    this.purgeModuleCache();
+
+    await this.loadSettings();
+    // files-menu is the multi-select right-click; file-menu is the single one.
+    this.registerEvent(
+      this.app.workspace.on('files-menu', (menu, files) => {
+        const notes = files.filter((f) => f && f.extension === 'md');
+        if (notes.length < 2) return;
+        menu.addItem((item) =>
+          item
+            .setTitle(`Download media for ${notes.length} notes`)
+            .setIcon('download')
+            .onClick(() => this.bulkDownload(notes))
+        );
+      })
+    );
+    this.registerEvent(
+      this.app.workspace.on('file-menu', (menu, file) => {
+        if (!file || file.extension !== 'md') return;
+        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter ?? null;
+        if (fm && fm['dl-all'] !== undefined) {
+          menu.addItem((item) =>
+            item
+              .setTitle('Download media for every video in this playlist')
+              .setIcon('download')
+              .onClick(() => this.downloadWholePlaylist(file))
+          );
+          return;
+        }
+        menu.addItem((item) =>
+          item
+            .setTitle('Download media for this note')
+            .setIcon('download')
+            .onClick(() => this.downloadMediaFor(file))
+        );
+      })
+    );
+
+    this.addSettingTab(new YouTubeArchiverSettingTab(this.app, this));
+
+    this.addRibbonIcon('download', 'Sync YouTube playlists', () => this.syncAll());
+
+    if (!this.settings.setupDone) {
+      this.app.workspace.onLayoutReady(async () => {
+        const report = await this.detectTools();
+        const filled = await this.autoConfigure(report);
+        this.settings.setupDone = true;
+        await this.saveSettings();
+        if (filled.length) new Notice(`ARCH YT Playlists configured itself: ${filled.length} setting(s).`, 8000);
+      });
+    }
+    this.addCommand({
+      id: 'sync-all',
+      name: 'Sync all playlists',
+      callback: () => this.syncAll(),
+    });
+    this.addCommand({
+      id: 'download-playlist-media',
+      name: 'Download media for every video in this playlist',
+      checkCallback: (checking) => {
+        const f = this.app.workspace.getActiveFile();
+        if (!f || f.extension !== 'md') return false;
+        const fm = this.app.metadataCache.getFileCache(f)?.frontmatter ?? null;
+        if (!fm || fm['dl-all'] === undefined) return false; // not a playlist note
+        if (!checking) this.downloadWholePlaylist(f);
+        return true;
+      },
+    });
+    this.addCommand({
+      id: 'download-media-note',
+      name: 'Download media for this note',
+      checkCallback: (checking) => {
+        const f = this.app.workspace.getActiveFile();
+        if (!f || f.extension !== 'md') return false;
+        if (!checking) this.downloadMediaFor(f);
+        return true;
+      },
+    });
+    this.addCommand({
+      id: 'setup',
+      name: 'Set up external tools',
+      callback: () => this.setup(),
+    });
+    this.addCommand({
+      id: 'fetch-details',
+      name: 'Fetch details and transcript for this note',
+      callback: () => this.hydrateActive(),
+    });
+    this.addCommand({
+      id: 'sync-prompt',
+      name: 'Sync one playlist by URL',
+      callback: () => this.syncPrompt(),
+    });
+  }
+
+  // Set by "use this for the rest of this session"; cleared on unload.
+  get sessionMode() { return this._sessionMode || null; }
+  set sessionMode(v) { this._sessionMode = v; }
+
+  log(...args) {
+    // Always on. The toggle only ever encoded indecision, and a log that is
+    // off by default is a log nobody has when they need it.
+    console.log('[ArchYTPlaylists]', ...args);
+  }
+
+  onunload() {
+    this.bulkRunning = false;
+    this._sessionMode = null;
+    // This plugin is meant to be switched off between uses, so leaving a yt-dlp
+    // process running or a sync writing into a dead plugin is not acceptable.
+    this.aborted = true;
+    for (const child of this.ytProcs || []) {
+      try {
+        child.kill();
+      } catch (_) {
+        /* already gone */
+      }
+    }
+    this.ytProcs = new Set();
+    if (this.activeNotice) {
+      try {
+        this.activeNotice.hide();
+      } catch (_) {
+        /* already hidden */
+      }
+      this.activeNotice = null;
+    }
+    this.archiverModule = null;
+    this.syncing = false;
+    this.purgeModuleCache();
+  }
+
+  purgeModuleCache() {
+    let dir;
+    try {
+      dir = path.join(this.pluginDir(), 'lib');
+    } catch (_) {
+      return;
+    }
+    for (const key of Object.keys(require.cache || {})) {
+      if (key.startsWith(dir)) delete require.cache[key];
+    }
+  }
+
+  // Lets a long sync stop promptly when the plugin is switched off.
+  checkAborted() {
+    if (this.aborted) throw new Error('__aborted__');
+  }
+
+  // lib/ cannot construct a Notice itself, so it calls through here.
+  toast(message, timeout = 8000) {
+    return new Notice(message, timeout);
+  }
+
+  notice(message, timeout = 0) {
+    if (this.activeNotice) {
+      try {
+        this.activeNotice.hide();
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    this.activeNotice = new Notice(message, timeout);
+    return this.activeNotice;
+  }
+
+  /* ---------------- lazy module load ---------------- */
+
+  archiver() {
+    if (!this.archiverModule) {
+      const { YouTubeBulk } = require(path.join(this.pluginDir(), 'lib', 'archiver.js'));
+      this.archiverModule = new YouTubeBulk(this);
+    }
+    return this.archiverModule;
+  }
+
+  pluginDir() {
+    const base =
+      this.app.vault.adapter && this.app.vault.adapter.getBasePath
+        ? this.app.vault.adapter.getBasePath()
+        : '';
+    return path.join(base, this.manifest.dir || '');
+  }
+
+  /* ---------------- running ---------------- */
+
+  async syncAll() {
+    const sources = (this.settings.sources || []).filter((s) => s && s.target);
+    if (!sources.length) {
+      new Notice('Add at least one playlist in ARCH YT Playlists settings.', 10000);
+      return;
+    }
+    if (this.syncing) {
+      new Notice('A sync is already running.');
+      return;
+    }
+    this.syncing = true;
+    this.aborted = false;
+    try {
+      for (const source of sources) {
+        this.checkAborted();
+        await this.archiver().run({
+          target: source.target,
+          note: source.note || source.target,
+          topics: splitList(source.topics || source.category),
+        });
+      }
+    } catch (e) {
+      if (String(e && e.message) === '__aborted__') {
+        this.log('sync stopped because the plugin was disabled');
+      } else {
+        console.error('[ArchYTPlaylists] sync failed:', e);
+        new Notice('Sync failed. See the developer console.', 10000);
+      }
+    } finally {
+      this.syncing = false;
+    }
+  }
+
+  async hydrateActive() {
+    const file = this.app.workspace.getActiveFile();
+    if (!file || file.extension !== 'md') return new Notice('Open a video note first.');
+    const { videoIdFromUrl } = require(path.join(this.pluginDir(), 'lib', 'archiver.js'));
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    const id = fm && videoIdFromUrl(fm.url);
+    if (!id) return new Notice('No YouTube address in this note\u2019s url property.');
+    const n = this.notice('Fetching details...', 0);
+    try {
+      const r = await this.archiver().hydrateOne(file, id);
+      n.hide();
+      new Notice(r.transcript ? 'Details and transcript added.' : 'Details added, no transcript available.', 8000);
+    } catch (e) {
+      n.hide();
+      new Notice(`Could not fetch details: ${e.message}`, 12000);
+    }
+  }
+
+  async syncPrompt() {
+    const { Modal } = require('obsidian');
+    const plugin = this;
+    class PromptModal extends Modal {
+      onOpen() {
+        this.titleEl.setText('Sync a playlist');
+        const input = this.contentEl.createEl('input', {
+          type: 'text',
+          attr: { placeholder: 'Playlist URL, playlist id, or Watch Later', style: 'width:100%;' },
+        });
+        const cat = this.contentEl.createEl('input', {
+          type: 'text',
+          attr: { placeholder: 'Categories (optional)', style: 'width:100%; margin-top:8px;' },
+        });
+        const row = this.contentEl.createDiv({
+          attr: { style: 'display:flex; gap:8px; margin-top:12px;' },
+        });
+        const go = row.createEl('button', { text: 'Sync', cls: 'mod-cta' });
+        go.onclick = async () => {
+          const target = input.value.trim();
+          this.close();
+          if (!target) return;
+          await plugin.archiver().run({ target, note: target, topics: splitList(cat.value) });
+        };
+        input.focus();
+        input.onkeydown = (e) => {
+          if (e.key === 'Enter') go.click();
+        };
+      }
+      onClose() {
+        this.contentEl.empty();
+      }
+    }
+    new PromptModal(this.app).open();
+  }
+
+  /* ---------------- vault helpers ---------------- */
+
+  async ensureFolder(folderPath) {
+    const parts = normalizePath(folderPath).split('/').filter(Boolean);
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      const existing = this.app.vault.getAbstractFileByPath(current);
+      if (existing instanceof TFolder) continue;
+      if (existing) throw new Error(`"${current}" exists but is a file.`);
+      try {
+        await this.app.vault.createFolder(current);
+      } catch (e) {
+        if (!/exists/i.test(String(e && e.message))) throw e;
+      }
+    }
+  }
+
+  async uniquePath(folder, filename) {
+    const ext = path.extname(filename);
+    const stem = filename.slice(0, filename.length - ext.length);
+    let candidate = normalizePath(`${folder}/${stem}${ext}`);
+    let n = 1;
+    while (this.app.vault.getAbstractFileByPath(candidate)) {
+      candidate = normalizePath(`${folder}/${stem}-${n++}${ext}`);
+    }
+    return candidate;
+  }
+
+  /* ---------------- yt-dlp ---------------- */
+
+  buildEnv() {
+    const env = Object.assign({}, process.env);
+    if (process.platform !== 'win32') {
+      const extras = [
+        '/opt/homebrew/bin',
+        '/usr/local/bin',
+        '/usr/bin',
+        '/bin',
+        path.join(os.homedir(), '.local', 'bin'),
+        path.join(os.homedir(), '.deno', 'bin'),
+      ];
+      env.PATH = [...extras, env.PATH || ''].filter(Boolean).join(path.delimiter);
+    }
+    return env;
+  }
+
+  tokenize(str) {
+    const out = [];
+    const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+    let m;
+    while ((m = re.exec(str))) out.push(m[1] ?? m[2] ?? m[3]);
+    return out;
+  }
+
+  // Mirrors Obsidian's "Default location for new attachments". noteFolder is the
+  // folder the note itself lands in. Returns a vault-relative folder ('' = root).
+  resolveThumbnailFolder(noteFolder) {
+    const mode = this.settings.thumbnailLocationMode || 'subfolder';
+    const clean = (s) =>
+      String(s || '')
+        .replace(/\\/g, '/')
+        .split('/')
+        .map((seg) => (seg === '.' || seg === '' ? '' : seg.replace(/[\\/:*?"<>|]/g, ' ').trim()))
+        .filter(Boolean)
+        .join('/');
+    if (mode === 'vault') return '';
+    if (mode === 'same' || mode === 'obsidian') return noteFolder;
+    if (mode === 'specified') return clean(this.settings.thumbnailFolder) || noteFolder;
+    const sub = clean(this.settings.thumbnailSubfolder || 'thumbnails');
+    return sub ? (noteFolder ? `${noteFolder}/${sub}` : sub) : noteFolder;
+  }
+
+  // Vault-relative unless an absolute path was typed. yt-dlp needs a real path.
+  resolveMediaFolder(noteFolder) {
+    const mode = this.settings.mediaLocationMode || 'subfolder';
+    const clean = (s) =>
+      String(s || '').replace(/\\/g, '/').split('/')
+        .map((seg) => (seg === '.' || seg === '' ? '' : seg.replace(/[\\/:*?"<>|]/g, ' ').trim()))
+        .filter(Boolean).join('/');
+    let rel;
+    if (mode === 'vault') rel = '';
+    else if (mode === 'same') rel = noteFolder;
+    else if (mode === 'specified') {
+      const raw = String(this.settings.mediaFolder || '').trim();
+      if (path.isAbsolute(raw)) return raw;
+      rel = clean(raw) || noteFolder;
+    } else {
+      const sub = clean(this.settings.mediaSubfolder || 'media');
+      rel = sub ? (noteFolder ? `${noteFolder}/${sub}` : sub) : noteFolder;
+    }
+    const base =
+      this.app.vault.adapter && this.app.vault.adapter.getBasePath
+        ? this.app.vault.adapter.getBasePath()
+        : '';
+    return rel ? path.join(base, rel) : base;
+  }
+
+  /* ---------------- media download ---------------- */
+
+  // Sequential on purpose: ten parallel yt-dlp processes saturate the connection
+  // and make failures impossible to read. The mode is asked once and reused.
+  // The videos are found by resolving each note's yt-playlist links rather than
+  // by folder, because a video can sit in several playlists and only one of them
+  // is its folder. Link resolution follows renames; a folder scan would not.
+  videosInPlaylist(playlistFile) {
+    const out = [];
+    for (const md of this.app.vault.getMarkdownFiles()) {
+      if (md.path === playlistFile.path) continue;
+      const cache = this.app.metadataCache.getFileCache(md);
+      const raw = cache?.frontmatter?.['yt-playlist'];
+      if (raw === undefined) continue;
+      const list = Array.isArray(raw) ? raw : [raw];
+      for (const entry of list) {
+        const m = String(entry).match(/\[\[([^\]|]+)/);
+        if (!m) continue;
+        const target = this.app.metadataCache.getFirstLinkpathDest(m[1].trim(), md.path);
+        if (target && target.path === playlistFile.path) {
+          out.push(md);
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  async downloadWholePlaylist(playlistFile) {
+    const videos = this.videosInPlaylist(playlistFile);
+    if (!videos.length) {
+      this.toast(`No video notes link to "${playlistFile.basename}".`);
+      return;
+    }
+    this.log(`playlist ${playlistFile.basename}: ${videos.length} video note(s)`);
+    const summary = await this.bulkDownload(videos);
+
+    // dl-all is only true when every video actually has its media on disk, which
+    // is checked rather than inferred from the run that just happened.
+    const missing = videos.filter((f) => {
+      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter ?? {};
+      return this.mediaOnDisk(fm).length === 0;
+    });
+    await this.setFrontmatterFields(playlistFile, { 'dl-all': missing.length === 0 });
+    if (missing.length) {
+      this.log(`dl-all stays false: ${missing.length} video(s) still without media`);
+    }
+    return summary;
+  }
+
+  async bulkDownload(files) {
+    if (this.bulkRunning) {
+      this.toast('A bulk download is already running.');
+      return;
+    }
+    const mode = await this.askMode(`${files.length} notes`);
+    if (!mode || mode === 'skip') return;
+
+    this.bulkRunning = true;
+    const notice = new Notice(`Downloading media: 0 / ${files.length}`, 0);
+    let done = 0, ok = 0, skipped = 0, failed = 0;
+    try {
+      for (const f of files) {
+        if (!this.bulkRunning) break; // unload aborts the loop
+        const r = await this.downloadMediaFor(f, mode);
+        if (r.ok && r.reason === 'already downloaded') skipped++;
+        else if (r.ok) ok++;
+        else failed++;
+        done++;
+        notice.setMessage(`Downloading media: ${done} / ${files.length}`);
+      }
+    } finally {
+      notice.hide();
+      this.bulkRunning = false;
+    }
+    this.log(`bulk finished: ${ok} downloaded, ${skipped} already present, ${failed} failed`);
+    this.toast(`Done. ${ok} downloaded, ${skipped} already there, ${failed} failed.`);
+    return { ok, skipped, failed };
+  }
+
+
+  // The url property is "[Link](https://...)"; the bare URL is also accepted.
+  urlFromNote(fm) {
+    const raw = String((fm && fm.url) || '');
+    const m = raw.match(/\((https?:\/\/[^)\s]+)\)/) || raw.match(/(https?:\/\/\S+)/);
+    return m ? m[1] : '';
+  }
+
+  // dl-ed is only a claim. This checks the disk, so a box ticked by hand or left
+  // stale by a deleted file does not decide whether a download happens.
+  mediaOnDisk(fm) {
+    const raw = (fm && fm.media) || '';
+    const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    const found = [];
+    for (const entry of list) {
+      const m = String(entry).match(/\[\[([^\]|]+)/);
+      const target = m ? m[1] : String(entry);
+      const tf = this.app.vault.getAbstractFileByPath(target);
+      if (tf) found.push(tf);
+    }
+    return found;
+  }
+
+  askMode(name) {
+    if (this.sessionMode) return Promise.resolve(this.sessionMode);
+    if (!this.settings.askDownloadMode) return Promise.resolve(this.settings.defaultDownloadMode);
+    return new Promise((resolve) => {
+      new DownloadModeModal(this.app, name, (mode, remember) => {
+        if (remember && mode) this.sessionMode = mode;
+        resolve(mode);
+      }).open();
+    });
+  }
+
+  // Downloads run one at a time whatever started them. A bulk run and the
+  // hotkey are separate entry points; without this they overlap, splitting
+  // bandwidth and, on the same note, writing the same output path twice.
+  enqueue(task) {
+    this._chain = (this._chain || Promise.resolve()).then(task, task);
+    return this._chain;
+  }
+
+  async downloadMediaFor(file, mode) {
+    if (!this._inFlight) this._inFlight = new Set();
+    if (this._inFlight.has(file.path)) {
+      this.log('already downloading, ignoring the repeat:', file.path);
+      return { ok: false, reason: 'in flight' };
+    }
+    this._inFlight.add(file.path);
+    try {
+      return await this.enqueue(() => this.runDownloadFor(file, mode));
+    } finally {
+      this._inFlight.delete(file.path);
+    }
+  }
+
+  async runDownloadFor(file, mode) {
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter ?? {};
+    const url = this.urlFromNote(fm);
+    if (!url) {
+      this.toast(`No url property in "${file.basename}".`);
+      return { ok: false, reason: 'no url' };
+    }
+
+    // Checked before anything is asked or fetched, so a re-run is cheap.
+    const already = this.mediaOnDisk(fm);
+    if (already.length) {
+      this.log('media already on disk, only correcting dl-ed:', file.path);
+      await this.setDlEd(file, true);
+      return { ok: true, reason: 'already downloaded' };
+    }
+
+    if (!mode) mode = await this.askMode(file.basename);
+    if (!mode || mode === 'skip') {
+      this.log('download skipped by user:', url);
+      return { ok: false, reason: 'skipped' };
+    }
+
+    const noteFolder = file.parent ? file.parent.path : '';
+    const folder = this.resolveMediaFolder(noteFolder);
+    try {
+      fs.mkdirSync(folder, { recursive: true });
+    } catch (e) {
+      this.toast(`Could not create the media folder: ${folder}`);
+      return { ok: false, reason: 'folder' };
+    }
+
+    // yt-dlp reads % in an output template, so it is doubled there. The plain
+    // form is kept for matching files on disk.
+    const rawStem = String(file.basename).replace(/[\\/:*?"<>|]/g, ' ').trim();
+    const stem = rawStem.replace(/%/g, '%%');
+    const notice = new Notice(`Downloading media for "${file.basename}"...`, 0);
+    const saved = [];
+    try {
+      if (mode === 'video_only' || mode === 'video_and_audio') {
+        const out = path.join(folder, `${stem}.%(ext)s`);
+        const vArgs = ['-f', this.settings.quality, '-o', out];
+        if (this.settings.downloadSubtitles) {
+          vArgs.push(
+            '--write-auto-subs', '--write-subs',
+            '--sub-langs', this.settings.subtitleLangs || 'en.*',
+            '--sub-format', 'vtt/best'
+          );
+        }
+        const r = await this.runMedia(vArgs, url, folder, rawStem);
+        if (!r.ok) {
+          notice.hide();
+          this.toast(`Video download failed for "${file.basename}". See the console.`);
+          console.error('[ArchYTPlaylists] video download failed:\n' + r.stderr);
+          return { ok: false, reason: 'video failed' };
+        }
+        saved.push(...r.files);
+        if (this.settings.downloadSubtitles && this.settings.keepOneSubtitle) {
+          this.pruneSubtitles(folder, rawStem);
+        }
+
+        if (mode === 'video_and_audio' && r.files.length) {
+          const mp3 = await this.extractAudioFrom(r.files[0], folder);
+          if (mp3) saved.push(mp3);
+          else this.log('audio extraction failed; the video is still saved');
+        }
+      } else if (mode === 'audio_only') {
+        // Staged in a temp folder: YouTube's best audio is itself a webm, so
+        // writing it beside the video under the same stem lands on the video,
+        // which yt-dlp then deletes after converting.
+        const staged = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-yt-audio-'));
+        const out = path.join(staged, `${stem}.%(ext)s`);
+        const r = await this.runMedia(
+          ['-f', 'bestaudio/best', '-x', '--audio-format', this.settings.audioFormat, '-o', out],
+          url,
+          staged,
+          rawStem
+        );
+        if (!r.ok) {
+          notice.hide();
+          this.toast(`Audio download failed for "${file.basename}". See the console.`);
+          console.error('[ArchYTPlaylists] audio download failed:\n' + r.stderr);
+          return { ok: false, reason: 'audio failed' };
+        }
+        for (const f of r.files) {
+          const dest = path.join(folder, path.basename(f));
+          try {
+            fs.renameSync(f, dest);
+          } catch (_) {
+            fs.copyFileSync(f, dest);
+            fs.unlinkSync(f);
+          }
+          saved.push(dest);
+        }
+        try { fs.rmSync(staged, { recursive: true, force: true }); } catch (_) {}
+      }
+    } finally {
+      notice.hide();
+    }
+
+    if (!saved.length) return { ok: false, reason: 'nothing saved' };
+
+    const base =
+      this.app.vault.adapter && this.app.vault.adapter.getBasePath
+        ? this.app.vault.adapter.getBasePath()
+        : '';
+    const links = saved.map((abs) => {
+      const rel = base && abs.startsWith(base) ? abs.slice(base.length + 1) : abs;
+      return `[[${rel.split('/').pop()}]]`;
+    });
+    await this.setFrontmatterFields(file, { media: links.length === 1 ? links[0] : links, 'dl-ed': true });
+    this.log('media saved:', saved.join(', '));
+    return { ok: true, files: saved };
+  }
+
+  // --remote-components is added here, not in buildFlags: enumeration has no
+  // challenge to solve, so making every sync fetch the solver would be waste.
+  async runMedia(args, url, folder, stem) {
+    const full = ['--no-playlist', '--remote-components', 'ejs:github', ...args];
+    const printFile = path.join(os.tmpdir(), `arch-yt-${Date.now()}.txt`);
+    const res = await this.runYtDlp(
+      [...full, '--no-simulate', '--print-to-file', 'after_move:filepath', printFile, url],
+      3600000
+    ).catch((e) => ({ code: 1, stdout: '', stderr: String((e && e.message) || e) }));
+
+    let files = [];
+    try {
+      files = fs.readFileSync(printFile, 'utf8').split('\n').map((s) => s.trim()).filter(Boolean);
+      fs.unlinkSync(printFile);
+    } catch (_) {
+      /* nothing was written */
+    }
+    files = files.filter((f) => fs.existsSync(f));
+
+    // yt-dlp skips a file that is already there, and after_move never fires, so
+    // an empty print file does not mean the download failed. Treating it as a
+    // failure meant the note kept dl-ed false and fetched the whole thing again
+    // on the next run. Fall back to looking for what the output template named.
+    if (res.code === 0 && !files.length && folder && stem) {
+      files = this.filesNamed(folder, stem);
+      if (files.length) this.log('print file was empty; matched on disk instead:', files.join(', '));
+    }
+    return { ok: res.code === 0 && files.length > 0, files, stderr: res.stderr || '' };
+  }
+
+  // Files the output template could have produced: the stem, optionally with
+  // yt-dlp's numeric suffix. Subtitle sidecars are excluded -- they are not the
+  // media file and would be linked as if they were.
+  filesNamed(folder, stem) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(folder);
+    } catch (_) {
+      return [];
+    }
+    const esc = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const shape = new RegExp(`^${esc}(?:[-. ]\\d+)?\\.[A-Za-z0-9]+$`, 'i');
+    return entries
+      .filter((n) => shape.test(n) && !/\.(vtt|srt|ass|lrc|json|txt)$/i.test(n))
+      .map((n) => path.join(folder, n));
+  }
+
+  // '--sub-langs en.*' matches every English variant YouTube offers -- en,
+  // en-US, en-GB, en-orig and the rest -- and yt-dlp writes all of them. The
+  // pattern stays broad so something always arrives even when there is no plain
+  // 'en' track; the surplus is removed here instead. Subtitle files are a few KB,
+  // so fetching several and keeping one is cheaper than a second request.
+  pruneSubtitles(folder, stem) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(folder);
+    } catch (_) {
+      return null;
+    }
+    const esc = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const shape = new RegExp(`^${esc}\\.([A-Za-z0-9_-]+)\\.(vtt|srt|ass)$`, 'i');
+
+    const found = [];
+    for (const name of entries) {
+      const m = name.match(shape);
+      if (m) found.push({ name, lang: m[1], ext: m[2].toLowerCase() });
+    }
+    if (found.length < 2) return found[0] ? path.join(folder, found[0].name) : null;
+
+    found.sort((a, b) => this.subtitleRank(a) - this.subtitleRank(b) || a.lang.localeCompare(b.lang));
+    const keep = found[0];
+    let removed = 0;
+    for (const f of found.slice(1)) {
+      try {
+        fs.unlinkSync(path.join(folder, f.name));
+        removed++;
+      } catch (_) {
+        /* leave it rather than fail the download over a subtitle */
+      }
+    }
+    this.log(`subtitles: kept ${keep.lang}, removed ${removed} other track(s)`);
+    return path.join(folder, keep.name);
+  }
+
+  // Lower sorts first. A plain language code beats a regional variant, and the
+  // original-language track beats an auto-translation of it.
+  subtitleRank(f) {
+    const lang = f.lang.toLowerCase();
+    const base = (this.settings.subtitleLangs || 'en').replace(/[.*].*$/, '').toLowerCase() || 'en';
+    if (lang === base) return 0;
+    if (lang === `${base}-orig`) return 1;
+    if (lang.startsWith(`${base}-`)) return 2;
+    return 3;
+  }
+
+  async extractAudioFrom(videoPath, folder) {
+    const format = this.settings.audioFormat || 'mp3';
+    const stem = path.basename(videoPath, path.extname(videoPath));
+    let dest = path.join(folder, `${stem}.${format}`);
+    if (dest === videoPath) return null;
+    let n = 1;
+    while (fs.existsSync(dest)) dest = path.join(folder, `${stem}-${n++}.${format}`);
+
+    const bin = this.settings.ffmpegLocation
+      ? path.join(this.settings.ffmpegLocation, 'ffmpeg')
+      : 'ffmpeg';
+    const args = ['-y', '-loglevel', 'error', '-i', videoPath, '-vn', '-b:a', '192k', dest];
+    const started = Date.now();
+    const code = await new Promise((resolve) => {
+      execFile(bin, args, { timeout: 600000 }, (err) => resolve(err ? 1 : 0));
+    });
+    if (code !== 0) {
+      try { fs.unlinkSync(dest); } catch (_) {}
+      return null;
+    }
+    this.log(`extracted ${format} in ${Date.now() - started}ms`);
+    return dest;
+  }
+
+  async setDlEd(file, value) {
+    await this.setFrontmatterFields(file, { 'dl-ed': value });
+  }
+
+  // Key order is insertion order, and that is what gets serialised, so the whole
+  // object is rebuilt in the configured order rather than any one key being
+  // shuffled to the end. Without this a property added later -- media, after a
+  // download -- always lands at the bottom.
+  applyOrder(fm, order) {
+    const wanted = splitList(order);
+    const ordered = {};
+    for (const key of wanted) {
+      if (Object.prototype.hasOwnProperty.call(fm, key)) ordered[key] = fm[key];
+    }
+    for (const key of Object.keys(fm)) {
+      if (!(key in ordered)) ordered[key] = fm[key]; // unlisted keys keep their place at the end
+    }
+    for (const key of Object.keys(fm)) delete fm[key];
+    Object.assign(fm, ordered);
+    return fm;
+  }
+
+  async setFrontmatterFields(file, fields) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      for (const [k, v] of Object.entries(fields)) fm[k] = v;
+      const isPlaylist = Object.prototype.hasOwnProperty.call(fm, 'dl-all');
+      this.applyOrder(
+        fm,
+        isPlaylist ? this.settings.playlistNoteOrder : this.settings.videoNoteOrder
+      );
+    });
+  }
+
+  buildFlags() {
+    const flags = [];
+    if (this.settings.cookiesFile) flags.push('--cookies', this.settings.cookiesFile);
+    else if (this.settings.cookiesFromBrowser)
+      flags.push('--cookies-from-browser', this.settings.cookiesFromBrowser);
+    if (this.settings.ffmpegLocation) flags.push('--ffmpeg-location', this.settings.ffmpegLocation);
+    if (this.settings.jsRuntime) flags.push('--js-runtime', this.settings.jsRuntime);
+    const extra = String(this.settings.ytDlpExtraArgs || '').trim();
+    if (extra) flags.push(...this.tokenize(extra));
+    return flags;
+  }
+
+  runYtDlp(args, timeoutMs = 0) {
+    const full = [...this.buildFlags(), ...args];
+    this.log('yt-dlp', full.join(' '));
+    return new Promise((resolve, reject) => {
+      const child = execFile(
+        this.settings.ytDlpPath || 'yt-dlp',
+        full,
+        {
+          env: this.buildEnv(),
+          encoding: 'utf8',
+          maxBuffer: 1024 * 1024 * 256, // a few hundred videos of JSON
+          timeout: timeoutMs || 0,
+          windowsHide: true,
+        },
+        (err, stdout, stderr) => {
+          if (err && err.code === 'ENOENT') return reject(err);
+          resolve({
+            code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+            stdout: stdout || '',
+            stderr: stderr || (err ? String(err.message) : ''),
+          });
+        }
+      );
+      this.ytProcs.add(child);
+      child.on('close', () => this.ytProcs.delete(child));
+    });
+  }
+
+  /* ---------------- tool detection and setup ---------------- */
+
+  binDir() { return path.join(this.pluginDir(), 'bin'); }
+  exeName(base) { return process.platform === 'win32' ? `${base}.exe` : base; }
+
+  candidatePaths(base) {
+    const name = this.exeName(base);
+    const list = [path.join(this.binDir(), name)];
+    if (process.platform === 'win32') {
+      list.push(
+        path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Links', name),
+        path.join(process.env.PROGRAMFILES || '', base, 'bin', name),
+        path.join(process.env.LOCALAPPDATA || '', 'Programs', base, name),
+        name
+      );
+    } else {
+      list.push(
+        `/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, `/usr/bin/${name}`,
+        `/snap/bin/${name}`, path.join(os.homedir(), '.local', 'bin', name),
+        path.join(os.homedir(), '.deno', 'bin', name), name
+      );
+    }
+    return list.filter(Boolean);
+  }
+
+  runProcess(command, args, timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
+      const child = execFile(command, args,
+        { env: this.buildEnv(), encoding: 'utf8', maxBuffer: 1024 * 1024 * 8, timeout: timeoutMs, windowsHide: true },
+        (err, stdout, stderr) => {
+          if (err && err.code === 'ENOENT') return reject(err);
+          resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: stdout || '', stderr: stderr || '' });
+        });
+      this.ytProcs.add(child);
+      child.on('close', () => this.ytProcs.delete(child));
+    });
+  }
+
+  async resolveAbsolutePath(name) {
+    if (path.isAbsolute(name)) return name;
+    try {
+      const r = await this.runProcess(process.platform === 'win32' ? 'where' : 'which', [name], 8000);
+      if (r.code === 0) {
+        const first = r.stdout.split('\n').map((x) => x.trim()).filter(Boolean)[0];
+        if (first && path.isAbsolute(first)) return first;
+      }
+    } catch (_) { /* fall through */ }
+    return name;
+  }
+
+  async findBinary(base, versionArgs = ['--version']) {
+    for (const candidate of this.candidatePaths(base)) {
+      try {
+        const r = await this.runProcess(candidate, versionArgs);
+        if (r.code === 0) {
+          return { found: true, path: await this.resolveAbsolutePath(candidate), version: (r.stdout || r.stderr).trim().split('\n')[0] };
+        }
+      } catch (_) { /* next */ }
+    }
+    return { found: false, path: null, version: null };
+  }
+
+  ytDlpAgeDays(v) {
+    const m = String(v || '').match(/(\d{4})\.(\d{2})\.(\d{2})/);
+    if (!m) return null;
+    return Math.floor((Date.now() - Date.UTC(+m[1], +m[2] - 1, +m[3])) / 86400000);
+  }
+
+  browserProfiles() {
+    const home = os.homedir();
+    const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    if (process.platform === 'darwin') {
+      const sup = path.join(home, 'Library', 'Application Support');
+      return [
+        { name: 'chrome', dir: path.join(sup, 'Google', 'Chrome') },
+        { name: 'brave', dir: path.join(sup, 'BraveSoftware', 'Brave-Browser') },
+        { name: 'edge', dir: path.join(sup, 'Microsoft Edge') },
+        { name: 'firefox', dir: path.join(sup, 'Firefox') },
+        { name: 'safari', dir: path.join(home, 'Library', 'Safari') },
+      ];
+    }
+    if (process.platform === 'win32') {
+      return [
+        { name: 'chrome', dir: path.join(local, 'Google', 'Chrome', 'User Data') },
+        { name: 'edge', dir: path.join(local, 'Microsoft', 'Edge', 'User Data') },
+        { name: 'brave', dir: path.join(local, 'BraveSoftware', 'Brave-Browser', 'User Data') },
+        { name: 'firefox', dir: path.join(roaming, 'Mozilla', 'Firefox') },
+      ];
+    }
+    return [
+      { name: 'chrome', dir: path.join(home, '.config', 'google-chrome') },
+      { name: 'brave', dir: path.join(home, '.config', 'BraveSoftware', 'Brave-Browser') },
+      { name: 'chromium', dir: path.join(home, '.config', 'chromium') },
+      { name: 'firefox', dir: path.join(home, '.mozilla', 'firefox') },
+    ];
+  }
+
+  detectBrowsers() {
+    const out = [];
+    for (const b of this.browserProfiles()) {
+      try {
+        const st = fs.statSync(b.dir);
+        if (st.isDirectory()) out.push({ ...b, mtime: st.mtimeMs });
+      } catch (_) { /* not installed */ }
+    }
+    return out.sort((a, b) => b.mtime - a.mtime);
+  }
+
+  async detectTools() {
+    const r = {};
+    r.ytdlp = await this.findBinary('yt-dlp');
+    if (r.ytdlp.found) r.ytdlp.ageDays = this.ytDlpAgeDays(r.ytdlp.version);
+    r.ffmpeg = await this.findBinary('ffmpeg', ['-version']);
+    r.jsRuntime = { found: false };
+    for (const rt of ['deno', 'node', 'bun', 'qjs']) {
+      const hit = await this.findBinary(rt);
+      if (hit.found) { r.jsRuntime = { ...hit, name: rt }; break; }
+    }
+    r.browsers = this.detectBrowsers();
+    return r;
+  }
+
+  async autoConfigure(report) {
+    const filled = [];
+    if (report.ytdlp.found && path.isAbsolute(report.ytdlp.path) && report.ytdlp.path !== this.settings.ytDlpPath) {
+      this.settings.ytDlpPath = report.ytdlp.path;
+      filled.push(`yt-dlp path \u2192 ${report.ytdlp.path}`);
+    }
+    if (report.ffmpeg.found && path.isAbsolute(report.ffmpeg.path)) {
+      const dir = path.dirname(report.ffmpeg.path);
+      if (dir !== this.settings.ffmpegLocation) {
+        this.settings.ffmpegLocation = dir;
+        filled.push(`ffmpeg folder \u2192 ${dir}`);
+      }
+    }
+    if (!this.settings.cookiesFile && !this.settings.cookiesFromBrowser && report.browsers.length) {
+      this.settings.cookiesFromBrowser = report.browsers[0].name;
+      filled.push(`Cookies from browser \u2192 ${report.browsers[0].name}`);
+    }
+    if (filled.length) await this.saveSettings();
+    return filled;
+  }
+
+  ytDlpAssetName() {
+    if (process.platform === 'win32') return 'yt-dlp.exe';
+    if (process.platform === 'darwin') return 'yt-dlp_macos';
+    return process.arch === 'arm64' ? 'yt-dlp_linux_aarch64' : 'yt-dlp_linux';
+  }
+
+  downloadToFile(url, dest, onProgress, hops = 0) {
+    return new Promise((resolve, reject) => {
+      if (hops > 6) return reject(new Error('too many redirects'));
+      const https = require('https');
+      const req = https.get(url, { headers: { 'User-Agent': 'archive-youtube-bulk' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          return resolve(this.downloadToFile(new URL(res.headers.location, url).toString(), dest, onProgress, hops + 1));
+        }
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+        const total = Number(res.headers['content-length'] || 0);
+        let done = 0;
+        const out = fs.createWriteStream(dest);
+        res.on('data', (c) => { done += c.length; if (onProgress && total) onProgress(done, total); });
+        res.pipe(out);
+        out.on('finish', () => out.close(() => resolve(dest)));
+        out.on('error', reject);
+      });
+      req.on('error', reject);
+      req.setTimeout(120000, () => req.destroy(new Error('timed out')));
+    });
+  }
+
+  async installYtDlp() {
+    const n = this.notice('Fetching yt-dlp...', 0);
+    try {
+      fs.mkdirSync(this.binDir(), { recursive: true });
+      const dest = path.join(this.binDir(), this.exeName('yt-dlp'));
+      const tmp = dest + '.part';
+      await this.downloadToFile(
+        `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${this.ytDlpAssetName()}`,
+        tmp,
+        (d, t) => n.setMessage(`Fetching yt-dlp... ${Math.round((d / t) * 100)}%`)
+      );
+      fs.renameSync(tmp, dest);
+      if (process.platform !== 'win32') fs.chmodSync(dest, 0o755);
+      if (process.platform === 'darwin') {
+        try { await this.runProcess('xattr', ['-d', 'com.apple.quarantine', dest], 8000); } catch (_) { /* usually absent */ }
+      }
+      const check = await this.runProcess(dest, ['--version'], 20000);
+      n.hide();
+      if (check.code !== 0) { new Notice('yt-dlp downloaded but would not run.', 10000); return false; }
+      this.settings.ytDlpPath = dest;
+      await this.saveSettings();
+      new Notice(`yt-dlp ${check.stdout.trim()} installed.`, 8000);
+      return true;
+    } catch (e) {
+      n.hide();
+      new Notice(`Could not install yt-dlp: ${e.message}`, 12000);
+      return false;
+    }
+  }
+
+  async updateYtDlp() {
+    const n = this.notice('Updating yt-dlp...', 0);
+    const bin = this.settings.ytDlpPath || 'yt-dlp';
+    let r = await this.runProcess(bin, ['-U'], 180000).catch((e) => ({ code: 1, stdout: '', stderr: String(e.message) }));
+    const all = r.stdout + r.stderr;
+    if (r.code === 0 && !/ERROR/i.test(all)) { n.hide(); new Notice(all.trim().split('\n').slice(-1)[0] || 'Up to date.', 8000); return; }
+    n.hide();
+    new Notice('yt-dlp could not self-update. Use Install standalone, or update it the way you installed it.', 12000);
+  }
+
+  async setup() {
+    const n = this.notice('Looking for yt-dlp, ffmpeg, browsers...', 0);
+    const report = await this.detectTools();
+    const filled = await this.autoConfigure(report);
+    n.hide();
+    this.log('tool report', report, 'filled', filled);
+    new SetupModal(this.app, this, report, filled).open();
+  }
+
+  /* ---------------- settings ---------------- */
+
+  // One-time copy, not a live dependency. Clip Archiver can be absent or removed.
+  async importFromClipArchiver() {
+    const configDir = this.app.vault.configDir || '.obsidian';
+    const base =
+      this.app.vault.adapter && this.app.vault.adapter.getBasePath
+        ? this.app.vault.adapter.getBasePath()
+        : '';
+    let file = null;
+    for (const dir of CLIPPINGS_PLUGIN_DIRS) {
+      const candidate = path.join(base, configDir, 'plugins', dir, 'data.json');
+      if (fs.existsSync(candidate)) {
+        file = candidate;
+        break;
+      }
+    }
+    if (!file) {
+      new Notice('No Clip Archiver settings found. Enter the paths manually.', 8000);
+      return false;
+    }
+    try {
+      const other = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const copied = [];
+      for (const key of [
+        'ytDlpPath',
+        'ffmpegLocation',
+        'cookiesFromBrowser',
+        'cookiesFile',
+        'jsRuntime',
+        'subtitleLangs',
+      ]) {
+        if (other[key]) {
+          this.settings[key] = other[key];
+          copied.push(key);
+        }
+      }
+      await this.saveSettings();
+      new Notice(`Copied ${copied.length} setting(s) from Clip Archiver.`, 8000);
+      return true;
+    } catch (e) {
+      console.error('[ArchYTPlaylists] import failed:', e);
+      new Notice('Could not read Clip Archiver settings.', 8000);
+      return false;
+    }
+  }
+
+  // The plugin folder has changed name, which changes where Obsidian keeps
+  // data.json. Pull the previous file across once so nothing is re-entered.
+  migrateFromOldFolder() {
+    try {
+      const base =
+        this.app.vault.adapter && this.app.vault.adapter.getBasePath
+          ? this.app.vault.adapter.getBasePath()
+          : '';
+      if (!base) return null;
+      for (const dir of ['arch-youtube', 'archive-youtube-bulk', 'youtube-archiver']) {
+        const old = path.join(base, this.app.vault.configDir || '.obsidian', 'plugins', dir, 'data.json');
+        if (!fs.existsSync(old)) continue;
+        console.log(`[ArchYTPlaylists] imported settings from the old ${dir} folder`);
+        return JSON.parse(fs.readFileSync(old, 'utf8'));
+      }
+    } catch (e) {
+      console.warn('[ArchYTPlaylists] could not migrate old settings:', e);
+    }
+    return null;
+  }
+
+  async loadSettings() {
+    let saved = (await this.loadData()) || {};
+    if (!Object.keys(saved).length) {
+      const migrated = this.migrateFromOldFolder();
+      if (migrated) {
+        saved = migrated;
+        await this.saveData(saved);
+      }
+    }
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
+    if (!Array.isArray(this.settings.sources)) {
+      this.settings.sources = DEFAULT_SETTINGS.sources.map((s) => ({ ...s }));
+    }
+    if (!Array.isArray(this.settings.tags)) this.settings.tags = [];
+    // Older vaults stored a bare subfolder name, which is what 'subfolder' means.
+    if (saved.thumbnailLocationMode === undefined) {
+      this.settings.thumbnailLocationMode = 'subfolder';
+      if (saved.thumbnailFolder) this.settings.thumbnailSubfolder = saved.thumbnailFolder;
+      this.settings.thumbnailFolder = '';
+    }
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+};
+
+class SetupModal extends Modal {
+  constructor(app, plugin, report, filled) {
+    super(app);
+    this.plugin = plugin;
+    this.report = report;
+    this.filled = filled || [];
+  }
+
+  onOpen() {
+    this.titleEl.setText('External tools');
+    this.render();
+  }
+
+  async refresh() {
+    this.report = await this.plugin.detectTools();
+    this.filled = await this.plugin.autoConfigure(this.report);
+    this.render();
+  }
+
+  row(label, ok, detail, action) {
+    const st = new Setting(this.contentEl).setName(label).setDesc(detail);
+    st.nameEl.prepend(
+      createSpan({
+        text: ok === true ? '\u25CF ' : ok === 'warn' ? '\u25CF ' : '\u25CB ',
+        attr: { style: `color: var(--color-${ok === true ? 'green' : ok === 'warn' ? 'yellow' : 'red'});` },
+      })
+    );
+    if (action) st.addButton((b) => b.setButtonText(action.label).onClick(action.onClick));
+    return st;
+  }
+
+  render() {
+    const { contentEl } = this;
+    const r = this.report;
+    const s = this.plugin.settings;
+    contentEl.empty();
+    contentEl.createEl('p', {
+      text: `${process.platform} ${process.arch}`,
+      attr: { style: 'font-size:var(--font-ui-smaller); opacity:.6; margin:0 0 12px;' },
+    });
+
+    if (this.filled.length) {
+      const box = contentEl.createDiv({
+        attr: { style: 'border-left:3px solid var(--color-green); padding:8px 12px; margin-bottom:14px; background:var(--background-secondary); border-radius:4px;' },
+      });
+      box.createEl('div', { text: 'Filled in for you', attr: { style: 'font-weight:600; margin-bottom:4px;' } });
+      for (const line of this.filled) {
+        box.createEl('div', { text: line, attr: { style: 'font-size:var(--font-ui-smaller); opacity:.85; word-break:break-all;' } });
+      }
+    }
+
+    const stale = r.ytdlp.found && r.ytdlp.ageDays !== null && r.ytdlp.ageDays > 30;
+    const ytRow = this.row(
+      'yt-dlp',
+      r.ytdlp.found ? (stale ? 'warn' : true) : false,
+      r.ytdlp.found
+        ? `${r.ytdlp.version}, ${r.ytdlp.ageDays} days old\n${r.ytdlp.path}` + (stale ? '\nOld builds are the usual cause of 403 errors.' : '')
+        : 'Required. A self-updating copy can be installed into this plugin\u2019s folder.',
+      r.ytdlp.found
+        ? { label: 'Update', onClick: async () => { await this.plugin.updateYtDlp(); this.refresh(); } }
+        : { label: 'Install', onClick: async () => { await this.plugin.installYtDlp(); this.refresh(); } }
+    );
+    if (r.ytdlp.found) {
+      ytRow.addButton((b) =>
+        b.setButtonText('Install standalone')
+          .setTooltip('Downloads a self-updating copy here. Your existing install is left alone.')
+          .onClick(async () => { await this.plugin.installYtDlp(); this.refresh(); })
+      );
+    }
+
+    this.row('ffmpeg', r.ffmpeg.found, r.ffmpeg.found ? `${r.ffmpeg.version}\n${r.ffmpeg.path}` : 'Only needed if you extract audio. Syncing does not use it.', null);
+
+    this.row('JavaScript runtime', r.jsRuntime.found ? true : 'warn',
+      r.jsRuntime.found ? `${r.jsRuntime.name} ${r.jsRuntime.version}` : 'yt-dlp uses one to solve YouTube challenges. Install Deno or Node and it is picked up automatically.', null);
+
+    let cookieDetail = 'None configured. Watch Later, Liked and private playlists need cookies.';
+    let cookieOk = 'warn';
+    if (s.cookiesFile) {
+      cookieOk = fs.existsSync(s.cookiesFile) ? true : false;
+      cookieDetail = fs.existsSync(s.cookiesFile) ? `File: ${s.cookiesFile}` : `No file at ${s.cookiesFile}`;
+    } else if (s.cookiesFromBrowser) {
+      cookieOk = true;
+      cookieDetail = `Read from ${s.cookiesFromBrowser} on each run.`;
+    }
+    const ck = this.row('Cookies', cookieOk, cookieDetail, null);
+    if ((r.browsers || []).length && !s.cookiesFile) {
+      ck.addDropdown((d) => {
+        d.addOption('', 'None');
+        for (const b of r.browsers) d.addOption(b.name, b.name);
+        d.setValue(s.cookiesFromBrowser || '');
+        d.onChange(async (v) => { s.cookiesFromBrowser = v; await this.plugin.saveSettings(); this.render(); });
+      });
+    }
+
+    new Setting(contentEl)
+      .addButton((b) => b.setButtonText('Check again').onClick(() => this.refresh()))
+      .addButton((b) => b.setButtonText('Close').setCta().onClick(() => this.close()));
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
+class DownloadModeModal extends Modal {
+  constructor(app, name, done) {
+    super(app);
+    this.name = name;
+    this.done = done;
+    this.answered = false;
+    this.remember = false;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl('h3', { text: 'Download media' });
+    contentEl.createEl('p', { text: this.name });
+
+    const row = contentEl.createDiv({ cls: 'modal-button-container' });
+    for (const [value, label] of [
+      ['video_and_audio', 'Video + Audio'],
+      ['video_only', 'Video'],
+      ['audio_only', 'Audio'],
+      ['skip', 'Skip'],
+    ]) {
+      const b = row.createEl('button', { text: label });
+      if (value === 'video_and_audio') b.addClass('mod-cta');
+      b.onclick = () => this.finish(value);
+    }
+
+    const remember = contentEl.createDiv();
+    const cb = remember.createEl('input', { type: 'checkbox' });
+    cb.id = 'arch-yt-remember';
+    cb.onchange = () => {
+      this.remember = cb.checked;
+    };
+    remember.createEl('label', {
+      text: ' Use this for the rest of this session',
+      attr: { for: 'arch-yt-remember' },
+    });
+  }
+
+  finish(mode) {
+    this.answered = true;
+    this.close();
+    this.done(mode, this.remember);
+  }
+
+  onClose() {
+    this.contentEl.empty();
+    // Closing with Escape is a skip, not a hang.
+    if (!this.answered) this.done(null, false);
+  }
+}
+
+class YouTubeArchiverSettingTab extends PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  save() {
+    return this.plugin.saveSettings();
+  }
+
+  display() {
+    const { containerEl } = this;
+    const s = this.plugin.settings;
+    containerEl.empty();
+
+    new Setting(containerEl).setName('Playlists').setHeading();
+
+    const srcBox = containerEl.createDiv();
+    const renderSources = () => {
+      srcBox.empty();
+      srcBox.createEl('p', {
+        text:
+          'Target is a playlist URL, a playlist id, or a shortcut: Watch Later, Liked, History, ' +
+          'Subscriptions. The second field is the playlist note name that videos link to. ' +
+          'Topics are written once when a note is created \u2014 later syncs never overwrite them, ' +
+          'so hand-sorting survives. A video in several playlists gets all of them in yt-playlist.',
+        attr: { style: 'font-size:var(--font-ui-smaller); opacity:.75;' },
+      });
+      s.sources.forEach((src, i) => {
+        const row = new Setting(srcBox).setName(`Source ${i + 1}`);
+        row.addText((t) =>
+          t.setPlaceholder('Watch Later').setValue(src.target || '').onChange(async (v) => {
+            src.target = v.trim();
+            await this.save();
+          })
+        );
+        row.addText((t) =>
+          t.setPlaceholder('Playlist note name').setValue(src.note || '').onChange(async (v) => {
+            src.note = v.trim();
+            await this.save();
+          })
+        );
+        row.addText((t) =>
+          t.setPlaceholder('topics: obsidian, ai').setValue(src.topics || '').onChange(async (v) => {
+            src.topics = v.trim();
+            await this.save();
+          })
+        );
+        row.addExtraButton((b) =>
+          b.setIcon('trash').setTooltip('Remove').onClick(async () => {
+            s.sources.splice(i, 1);
+            await this.save();
+            renderSources();
+          })
+        );
+      });
+      new Setting(srcBox)
+        .addButton((b) =>
+          b.setButtonText('Add source').onClick(async () => {
+            s.sources.push({ target: '', note: '', topics: '' });
+            await this.save();
+            renderSources();
+          })
+        )
+        .addButton((b) => b.setButtonText('Sync now').setCta().onClick(() => this.plugin.syncAll()));
+    };
+    renderSources();
+
+    new Setting(containerEl).setName('Output').setHeading();
+
+    new Setting(containerEl)
+      .setName('Video note property order')
+      .setDesc('Comma-separated. Reorders or drops properties; it cannot add one that is not produced.')
+      .addText((t) =>
+        t.setValue(s.videoNoteOrder).onChange(async (v) => {
+          s.videoNoteOrder = v.trim() || DEFAULT_SETTINGS.videoNoteOrder;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Playlist note property order')
+      .setDesc('Comma-separated, same rules.')
+      .addText((t) =>
+        t.setValue(s.playlistNoteOrder).onChange(async (v) => {
+          s.playlistNoteOrder = v.trim() || DEFAULT_SETTINGS.playlistNoteOrder;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl).setName('Media download').setHeading();
+
+    new Setting(containerEl)
+      .setName('Media location')
+      .addDropdown((d) =>
+        d
+          .addOption('vault', 'Vault folder')
+          .addOption('same', 'Same folder as the note')
+          .addOption('subfolder', 'In subfolder under the note')
+          .addOption('specified', 'In the folder specified below')
+          .setValue(s.mediaLocationMode || 'subfolder')
+          .onChange(async (v) => {
+            s.mediaLocationMode = v;
+            await this.save();
+            this.display();
+          })
+      );
+
+    if (s.mediaLocationMode === 'subfolder') {
+      new Setting(containerEl)
+        .setName('Media subfolder name')
+        .addText((t) =>
+          t.setValue(s.mediaSubfolder).onChange(async (v) => {
+            s.mediaSubfolder = v.trim() || 'Materials';
+            await this.save();
+          })
+        );
+    }
+
+    if (s.mediaLocationMode === 'specified') {
+      new Setting(containerEl)
+        .setName('Media folder')
+        .setDesc('Vault-relative, or an absolute path outside the vault.')
+        .addText((t) =>
+          t.setValue(s.mediaFolder).onChange(async (v) => {
+            s.mediaFolder = v.trim();
+            await this.save();
+          })
+        );
+    }
+
+    new Setting(containerEl)
+      .setName('Video quality')
+      .setDesc('A yt-dlp format selector. The default merges best video with best audio.')
+      .addText((t) =>
+        t.setValue(s.quality).onChange(async (v) => {
+          s.quality = v.trim() || DEFAULT_SETTINGS.quality;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Audio format')
+      .addDropdown((d) =>
+        d
+          .addOption('mp3', 'mp3')
+          .addOption('m4a', 'm4a')
+          .addOption('opus', 'opus')
+          .addOption('flac', 'flac')
+          .setValue(s.audioFormat || 'mp3')
+          .onChange(async (v) => {
+            s.audioFormat = v;
+            await this.save();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Download subtitles with the video')
+      .setDesc('Uses the subtitle languages set above. Saved beside the video as .vtt.')
+      .addToggle((t) =>
+        t.setValue(s.downloadSubtitles).onChange(async (v) => {
+          s.downloadSubtitles = v;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Keep only the best subtitle')
+      .setDesc('yt-dlp fetches every track matching the language pattern. This removes the extras, keeping the original track where there is one.')
+      .addToggle((t) =>
+        t.setValue(s.keepOneSubtitle).onChange(async (v) => {
+          s.keepOneSubtitle = v;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Ask what to download')
+      .setDesc('Off means always use the default choice without a prompt.')
+      .addToggle((t) =>
+        t.setValue(s.askDownloadMode).onChange(async (v) => {
+          s.askDownloadMode = v;
+          await this.save();
+          this.display();
+        })
+      );
+
+    if (!s.askDownloadMode) {
+      new Setting(containerEl)
+        .setName('Default choice')
+        .addDropdown((d) =>
+          d
+            .addOption('video_and_audio', 'Video + Audio')
+            .addOption('video_only', 'Video')
+            .addOption('audio_only', 'Audio')
+            .setValue(s.defaultDownloadMode || 'video_and_audio')
+            .onChange(async (v) => {
+              s.defaultDownloadMode = v;
+              await this.save();
+            })
+        );
+    }
+
+    new Setting(containerEl)
+      .setName('Archive root')
+      .setDesc('Playlist notes go here; each playlist gets a folder beside its note.')
+      .addText((t) =>
+        t.setValue(s.archiveRoot).onChange(async (v) => {
+          s.archiveRoot = v.trim() || 'Playlists';
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Tags')
+      .setDesc('Comma-separated, applied to every note a sync creates.')
+      .addText((t) =>
+        t.setValue((s.tags || []).join(', ')).onChange(async (v) => {
+          s.tags = splitList(v);
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Include transcripts when fetching details')
+      .setDesc('Applies to the per-note "Fetch details" command, not to syncing. Syncing never downloads subtitles.')
+      .addToggle((t) =>
+        t.setValue(s.transcript).onChange(async (v) => {
+          s.transcript = v;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Download thumbnails')
+      .setDesc('Saves each video\u2019s thumbnail into the vault and points the img property at it.')
+      .addToggle((t) =>
+        t.setValue(s.downloadThumbnails).onChange(async (v) => {
+          s.downloadThumbnails = v;
+          await this.save();
+          this.display();
+        })
+      );
+
+    if (s.downloadThumbnails) {
+      new Setting(containerEl)
+        .setName('Thumbnail location')
+        .setDesc('Same choices as Obsidian\'s own attachment setting.')
+        .addDropdown((d) =>
+          d
+            .addOption('obsidian', 'Follow Obsidian\'s attachment setting')
+            .addOption('vault', 'Vault folder')
+            .addOption('same', 'Same folder as the note')
+            .addOption('subfolder', 'In subfolder under the note')
+            .addOption('specified', 'In the folder specified below')
+            .setValue(s.thumbnailLocationMode || 'subfolder')
+            .onChange(async (v) => {
+              s.thumbnailLocationMode = v;
+              await this.save();
+              this.display();
+            })
+        );
+
+      if (s.thumbnailLocationMode === 'subfolder') {
+        new Setting(containerEl)
+          .setName('Thumbnail subfolder name')
+          .addText((t) =>
+            t.setValue(s.thumbnailSubfolder).onChange(async (v) => {
+              s.thumbnailSubfolder = v.trim() || 'Materials';
+              await this.save();
+            })
+          );
+      }
+
+      if (s.thumbnailLocationMode === 'specified') {
+        new Setting(containerEl)
+          .setName('Thumbnail folder')
+          .setDesc('Path from the vault root.')
+          .addText((t) =>
+            t.setValue(s.thumbnailFolder).onChange(async (v) => {
+              s.thumbnailFolder = v.trim();
+              await this.save();
+            })
+          );
+      }
+    }
+
+    new Setting(containerEl)
+      .setName('Subtitle languages')
+      .setDesc('yt-dlp filter. "en.*" takes English including auto-generated.')
+      .addText((t) =>
+        t.setValue(s.subtitleLangs).onChange(async (v) => {
+          s.subtitleLangs = v.trim() || 'en.*';
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Note name')
+      .setDesc('Placeholders: {{channel}} and {{title}}. Notes are created with this name, so nothing is renamed afterwards.')
+      .addText((t) =>
+        t.setValue(s.noteNameTemplate).onChange(async (v) => {
+          s.noteNameTemplate = v.trim() || DEFAULT_SETTINGS.noteNameTemplate;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Pause that starts a new paragraph')
+      .setDesc('Seconds of silence. Auto-captions have no punctuation, so a gap in the timing is the only clue a sentence ended.')
+      .addText((t) =>
+        t.setValue(String(s.transcriptGapSeconds)).onChange(async (v) => {
+          const n = Number(v);
+          s.transcriptGapSeconds = Number.isFinite(n) && n >= 0 ? n : 1.4;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Longest paragraph')
+      .setDesc('Seconds. A safety cap for speakers who never pause. 0 writes one unbroken block.')
+      .addText((t) =>
+        t.setValue(String(s.transcriptParagraphSeconds)).onChange(async (v) => {
+          const n = Number(v);
+          s.transcriptParagraphSeconds = Number.isFinite(n) && n >= 0 ? n : 60;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Description limit')
+      .setDesc('Max lines kept after promo blocks and timestamp lists are stripped.')
+      .addText((t) =>
+        t.setValue(String(s.descriptionMaxLines)).onChange(async (v) => {
+          const n = Number(v);
+          s.descriptionMaxLines = Number.isFinite(n) && n >= 0 ? n : 20;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl).setName('yt-dlp').setHeading();
+
+    new Setting(containerEl)
+      .setName('Set up external tools')
+      .setDesc('Finds yt-dlp, ffmpeg, a JavaScript runtime and your browsers, fills the fields in, and offers to install what is missing.')
+      .addButton((b) =>
+        b.setButtonText('Open setup').setCta().onClick(async () => {
+          await this.plugin.setup();
+          this.display();
+        })
+      )
+      .addButton((b) =>
+        b.setButtonText('Copy from ARCH After Clipping').onClick(async () => {
+          await this.plugin.importFromClipArchiver();
+          this.display();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('yt-dlp path')
+      .addText((t) =>
+        t.setValue(s.ytDlpPath).onChange(async (v) => {
+          s.ytDlpPath = v.trim() || 'yt-dlp';
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('ffmpeg folder')
+      .addText((t) =>
+        t.setValue(s.ffmpegLocation).onChange(async (v) => {
+          s.ffmpegLocation = v.trim();
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Cookies from browser')
+      .setDesc('Needed for Watch Later, Liked and private playlists.')
+      .addText((t) =>
+        t.setValue(s.cookiesFromBrowser).onChange(async (v) => {
+          s.cookiesFromBrowser = v.trim();
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Cookies file')
+      .setDesc('Overrides the browser setting when set.')
+      .addText((t) =>
+        t.setValue(s.cookiesFile).onChange(async (v) => {
+          s.cookiesFile = v.trim();
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('JavaScript runtime')
+      .setDesc('Leave blank to let yt-dlp find one.')
+      .addText((t) =>
+        t.setValue(s.jsRuntime).setPlaceholder('auto').onChange(async (v) => {
+          s.jsRuntime = v.trim();
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Extra yt-dlp arguments')
+      .addText((t) =>
+        t.setValue(s.ytDlpExtraArgs).onChange(async (v) => {
+          s.ytDlpExtraArgs = v.trim();
+          await this.save();
+        })
+      );
+
+  }
+}
