@@ -129,17 +129,32 @@ existed, After Clipping renamed every note here on every sync — including rena
 the playlist note itself. **If you rename those properties, After Clipping's
 `otherArchKeys` setting must change to match.**
 
-## Before publishing
+## Releasing
 
-- `manifest.json` and `LICENSE` still contain `AUTHOR_NAME`; the manifest also has
-  `AUTHOR_HANDLE`.
-- **Blocking:** distribution delivers only `main.js`, `manifest.json` and
-  `styles.css`. `lib/archiver.js`, `lib/describe.js` and `lib/vtt.js` would not
-  arrive, and `main.js` requires `archiver.js` by path — the plugin dies on load.
-  It must be bundled into one `main.js` before any GitHub-release install works.
-- Nothing in `lib/` may `require('obsidian')`. That module is injected into
-  `main.js`'s scope only; a file loaded from disk by plain Node cannot resolve it.
-  This already broke every sync once. Notices route through `plugin.toast()`.
+`npm run build` writes `dist/main.js` and `dist/manifest.json`. Those two files
+are what a release ships; `dist/` is gitignored, since it is output.
+
+A release delivers only `main.js`, `manifest.json` and `styles.css`, so `lib/`
+has to travel inside `main.js` — otherwise `main.js` looks for `lib/archiver.js`
+in a folder that was never installed and the plugin dies on load. This blocked
+every release install until 1.3.0. The build bundles `archiver.js` and the
+`vtt.js` and `describe.js` it requires into one expression assigned to
+`ARCH_LIB`, prepended to `main.js`.
+
+**`lib()` is the only place `lib/archiver.js` is loaded**, and it takes `ARCH_LIB`
+when defined and falls back to reading from disk when it is not. That fallback is
+what keeps the repo runnable unbuilt: edit, reload in Obsidian, no build step. Do
+not "tidy" it into a single path — losing the fallback costs the edit-and-reload
+loop, losing the bundle brings back the load failure.
+
+Verify a release the way it actually installs: copy only `dist/main.js` and
+`dist/manifest.json` into a folder with no `lib/`, and load it.
+
+Nothing in `lib/` may `require('obsidian')`. That module is injected into
+`main.js`'s scope only; a file loaded from disk by plain Node cannot resolve it.
+This already broke every sync once. Notices route through `plugin.toast()`. The
+build lists `obsidian` as external so a stray require fails loudly rather than
+being quietly inlined.
 
 ## Working style that helps
 

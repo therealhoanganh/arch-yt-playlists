@@ -9,3 +9,6 @@ node_modules/
 
 # Local Claude Code config and personal working notes
 .claude/
+
+# Release build output; produced by `npm run build`, attached to releases
+dist/

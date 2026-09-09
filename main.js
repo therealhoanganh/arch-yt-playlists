@@ -8,7 +8,7 @@ const os = require('os');
 
 const DEFAULT_SETTINGS = {
   // where notes land
-  archiveRoot: 'Playlists',
+  archiveRoot: 'YouTube/Playlists',
   tags: ['youtube-video'],
   playlistTags: ['youtube-playlist'],
 
@@ -23,9 +23,9 @@ const DEFAULT_SETTINGS = {
   transcript: true,
   downloadThumbnails: true,
   // Same choices as Obsidian's "Default location for new attachments".
-  thumbnailLocationMode: 'subfolder', // obsidian | vault | same | subfolder | specified
+  thumbnailLocationMode: 'specified', // obsidian | vault | same | subfolder | specified
   thumbnailSubfolder: 'Materials',
-  thumbnailFolder: '',
+  thumbnailFolder: 'YouTube/Images',
   subtitleLangs: 'en.*',
   transcriptParagraphSeconds: 25,
   transcriptGapSeconds: 1.4,
@@ -36,9 +36,9 @@ const DEFAULT_SETTINGS = {
   descriptionMaxChars: 1200,
 
   // media download
-  mediaLocationMode: 'subfolder', // vault | same | subfolder | specified
+  mediaLocationMode: 'specified', // vault | same | subfolder | specified
   mediaSubfolder: 'Materials',
-  mediaFolder: '',
+  mediaFolder: 'YouTube/Medias',
   quality: 'bestvideo*+bestaudio/best',
   audioFormat: 'mp3',
   askDownloadMode: true,
@@ -248,6 +248,19 @@ module.exports = class YouTubeArchiver extends Plugin {
   }
 
   // Lets a long sync stop promptly when the plugin is switched off.
+  // The one place lib/archiver.js is loaded.
+  //
+  // A release build inlines that module and defines ARCH_LIB, because a release
+  // delivers only main.js, manifest.json and styles.css -- a lib/ loaded from
+  // disk would not arrive and the plugin would die on load. Working from the
+  // repo there is no ARCH_LIB, so it comes off disk as before, which is what
+  // keeps an edit-and-reload loop working with no build step. Both give the
+  // same module object.
+  lib() {
+    if (typeof ARCH_LIB !== 'undefined') return ARCH_LIB;
+    return require(path.join(this.pluginDir(), 'lib', 'archiver.js'));
+  }
+
   checkAborted() {
     if (this.aborted) throw new Error('__aborted__');
   }
@@ -273,7 +286,7 @@ module.exports = class YouTubeArchiver extends Plugin {
 
   archiver() {
     if (!this.archiverModule) {
-      const { YouTubeBulk } = require(path.join(this.pluginDir(), 'lib', 'archiver.js'));
+      const { YouTubeBulk } = this.lib();
       this.archiverModule = new YouTubeBulk(this);
     }
     return this.archiverModule;
@@ -324,7 +337,7 @@ module.exports = class YouTubeArchiver extends Plugin {
   async hydrateActive() {
     const file = this.app.workspace.getActiveFile();
     if (!file || file.extension !== 'md') return new Notice('Open a video note first.');
-    const { videoIdFromUrl } = require(path.join(this.pluginDir(), 'lib', 'archiver.js'));
+    const { videoIdFromUrl } = this.lib();
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
     const id = fm && videoIdFromUrl(fm.url);
     if (!id) return new Notice('No YouTube address in this note\u2019s url property.');
@@ -529,7 +542,7 @@ module.exports = class YouTubeArchiver extends Plugin {
       if (!opts.auto) this.toast('A date fill is already running.');
       return;
     }
-    const { videoIdFromUrl, isoDate } = require(path.join(this.pluginDir(), 'lib', 'archiver.js'));
+    const { videoIdFromUrl, isoDate } = this.lib();
 
     // Video id -> note, so each JSON line yt-dlp emits can find where it goes.
     // A sync passes this in: it has just created these notes and the metadata
