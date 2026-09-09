@@ -3,7 +3,11 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.3.0 — current
+## 1.3.1 — current
+
+- **The new thumbnail default did not survive a fresh install.** A migration added in 0.14.0 maps a vault predating `thumbnailLocationMode` onto subfolder mode, so nothing moves. It fired whenever the setting was absent from saved data — which includes an install with no saved data at all, where it overwrote the shipped default with `subfolder` and blanked the specified folder. It now runs only when there is a saved config to migrate. A vault that predates the setting still maps to its old subfolder exactly as before.
+
+## 1.3.0
 
 - **Video notes carry `published`**, the video's upload date as `YYYY-MM-DD`. It is not written by sync and cannot be: `--flat-playlist` returns `timestamp` and `release_timestamp` as `null` and has no `upload_date` field, so the date is only available from a full extraction. Making sync pay for that is exactly what 0.6.0 removed.
 - **`hydrateOne` writes it.** That pass already fetched full metadata and already had `upload_date` in hand — it was being discarded because the pass deliberately rewrote only the body. The frontmatter is still otherwise untouched; `published` is the single exception.

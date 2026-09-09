@@ -1316,7 +1316,10 @@ module.exports = class YouTubeArchiver extends Plugin {
     }
     if (!Array.isArray(this.settings.tags)) this.settings.tags = [];
     // Older vaults stored a bare subfolder name, which is what 'subfolder' means.
-    if (saved.thumbnailLocationMode === undefined) {
+    // Only when there is a saved config predating the setting: on a fresh install
+    // saved is empty, there is nothing to migrate, and running this would stomp
+    // the defaults with 'subfolder' and blank the specified folder.
+    if (Object.keys(saved).length && saved.thumbnailLocationMode === undefined) {
       this.settings.thumbnailLocationMode = 'subfolder';
       if (saved.thumbnailFolder) this.settings.thumbnailSubfolder = saved.thumbnailFolder;
       this.settings.thumbnailFolder = '';
