@@ -15,9 +15,9 @@ const DEFAULT_SETTINGS = {
   // Frontmatter order, as a plain list. A name not in the list is appended, and
   // a name listed but not produced is skipped, so editing this can reorder or
   // drop a property but cannot invent one.
-  videoNoteOrder: 'dl-ed, duration, url, banner, yt-playlist, channel, media, tags',
-  playlistNoteOrder: 'dl-all, count, url, topic, tags',
-  sources: [{ target: 'Watch Later', note: 'Watch Later', topics: '' }],
+  videoNoteOrder: 'dl-ed, duration, url, banner, yt-playlist, channel, media, published, tags',
+  playlistNoteOrder: 'dl-all, count, url, tags',
+  sources: [{ target: 'Watch Later', note: 'Watch Later' }],
 
   // what to fetch
   transcript: true,
@@ -30,6 +30,8 @@ const DEFAULT_SETTINGS = {
   transcriptParagraphSeconds: 25,
   transcriptGapSeconds: 1.4,
   noteNameTemplate: '{{channel}} \u2014 {{title}}',
+  playlistNoteNameTemplate: '{{channel}} \u2013 {{title}}',
+  fillDatesAfterSync: true,
   descriptionMaxLines: 20,
   descriptionMaxChars: 1200,
 
@@ -109,6 +111,12 @@ module.exports = class YouTubeArchiver extends Plugin {
               .setIcon('download')
               .onClick(() => this.downloadWholePlaylist(file))
           );
+          menu.addItem((item) =>
+            item
+              .setTitle('Fill publish dates for this playlist')
+              .setIcon('calendar')
+              .onClick(() => this.fillPlaylistDates(file))
+          );
           return;
         }
         menu.addItem((item) =>
@@ -151,6 +159,18 @@ module.exports = class YouTubeArchiver extends Plugin {
       },
     });
     this.addCommand({
+      id: 'fill-playlist-dates',
+      name: 'Fill publish dates for this playlist',
+      checkCallback: (checking) => {
+        const f = this.app.workspace.getActiveFile();
+        if (!f || f.extension !== 'md') return false;
+        const fm = this.app.metadataCache.getFileCache(f)?.frontmatter ?? null;
+        if (!fm || fm['dl-all'] === undefined) return false; // not a playlist note
+        if (!checking) this.fillPlaylistDates(f);
+        return true;
+      },
+    });
+    this.addCommand({
       id: 'download-media-note',
       name: 'Download media for this note',
       checkCallback: (checking) => {
@@ -189,6 +209,7 @@ module.exports = class YouTubeArchiver extends Plugin {
 
   onunload() {
     this.bulkRunning = false;
+    this.datesRunning = false;
     this._sessionMode = null;
     // This plugin is meant to be switched off between uses, so leaving a yt-dlp
     // process running or a sync writing into a dead plugin is not acceptable.
@@ -286,7 +307,6 @@ module.exports = class YouTubeArchiver extends Plugin {
         await this.archiver().run({
           target: source.target,
           note: source.note || source.target,
-          topics: splitList(source.topics || source.category),
         });
       }
     } catch (e) {
@@ -329,10 +349,6 @@ module.exports = class YouTubeArchiver extends Plugin {
           type: 'text',
           attr: { placeholder: 'Playlist URL, playlist id, or Watch Later', style: 'width:100%;' },
         });
-        const cat = this.contentEl.createEl('input', {
-          type: 'text',
-          attr: { placeholder: 'Categories (optional)', style: 'width:100%; margin-top:8px;' },
-        });
         const row = this.contentEl.createDiv({
           attr: { style: 'display:flex; gap:8px; margin-top:12px;' },
         });
@@ -341,7 +357,7 @@ module.exports = class YouTubeArchiver extends Plugin {
           const target = input.value.trim();
           this.close();
           if (!target) return;
-          await plugin.archiver().run({ target, note: target, topics: splitList(cat.value) });
+          await plugin.archiver().run({ target, note: target });
         };
         input.focus();
         input.onkeydown = (e) => {
@@ -501,6 +517,93 @@ module.exports = class YouTubeArchiver extends Plugin {
       this.log(`dl-all stays false: ${missing.length} video(s) still without media`);
     }
     return summary;
+  }
+
+  // The publish date is null in the flat enumeration sync uses, so it needs a
+  // real extraction pass. hydrate() does a whole playlist in one yt-dlp process,
+  // which measured about 2.3s a video against 3.3s for one-at-a-time calls, so
+  // this is a single walk-away run rather than opening every note by hand.
+  // Sequential and abortable for the same reasons bulkDownload is.
+  async fillPlaylistDates(playlistFile, opts = {}) {
+    if (this.datesRunning) {
+      if (!opts.auto) this.toast('A date fill is already running.');
+      return;
+    }
+    const { videoIdFromUrl, isoDate } = require(path.join(this.pluginDir(), 'lib', 'archiver.js'));
+
+    // Video id -> note, so each JSON line yt-dlp emits can find where it goes.
+    // A sync passes this in: it has just created these notes and the metadata
+    // cache has not caught up, so rebuilding it from the cache would come back
+    // empty for precisely the new notes.
+    let byId = opts.byId;
+    if (!byId) {
+      byId = new Map();
+      for (const f of this.videosInPlaylist(playlistFile)) {
+        const id = videoIdFromUrl(this.app.metadataCache.getFileCache(f)?.frontmatter?.url);
+        if (id) byId.set(id, f);
+      }
+    }
+    if (!byId.size) {
+      if (!opts.auto) this.toast(`No video notes link to "${playlistFile.basename}".`);
+      return;
+    }
+
+    // Only the notes actually missing a date are fetched, and they are fetched
+    // by their own addresses rather than through the playlist. Re-extracting a
+    // whole playlist to fill the three videos added since last week is the
+    // expensive mistake here: at ~2.3s a video it is the difference between
+    // seconds and half an hour on a long list. A note with no cache entry yet
+    // counts as missing, which is right -- it was just created.
+    const missing = [];
+    for (const [id, file] of byId) {
+      if (!this.app.metadataCache.getFileCache(file)?.frontmatter?.published) missing.push([id, file]);
+    }
+    if (!missing.length) {
+      this.log(`date fill skipped for ${playlistFile.basename}: all ${byId.size} note(s) already have one`);
+      if (!opts.auto) this.toast(`${playlistFile.basename}: every note already has a publish date.`);
+      return;
+    }
+    const wanted = new Map(missing);
+    const urls = missing.map(([id]) => `https://www.youtube.com/watch?v=${id}`);
+    this.log(`date fill for ${playlistFile.basename}: ${missing.length} of ${byId.size} note(s) need a date`);
+
+    this.datesRunning = true;
+    const notice = this.notice(`Fetching ${missing.length} publish date(s)...`, 0);
+    let seen = 0, written = 0, noDate = 0, unmatched = 0;
+    try {
+      await this.archiver().hydrate(urls, async (j) => {
+        this.checkAborted();
+        seen++;
+        const file = wanted.get(j.id);
+        if (!file) { unmatched++; return; }
+        const published = isoDate(j.upload_date);
+        if (!published) { noDate++; return; }
+        await this.setFrontmatterFields(file, { published });
+        written++;
+        if (written % 10 === 0) notice.setMessage(`${written} of ${missing.length} date(s)...`);
+      }, false);
+      notice.hide();
+      this.log(`date fill done: ${seen} seen, ${written} written, ${noDate} without a date, ${unmatched} unexpected`);
+      // After a sync this is a second notice on top of the sync's own, so it is
+      // only worth showing when it actually did something.
+      if (!opts.auto || written) {
+        this.toast(
+          `${playlistFile.basename}: ${written} publish date(s) written` +
+            (noDate ? `, ${noDate} with no date from YouTube` : ''),
+          10000
+        );
+      }
+    } catch (e) {
+      notice.hide();
+      if (String(e && e.message) === '__aborted__') {
+        this.log('date fill stopped because the plugin was disabled');
+      } else {
+        console.error('[ArchYTPlaylists] date fill failed:', e);
+        new Notice(`Could not fetch publish dates: ${e.message}`, 12000);
+      }
+    } finally {
+      this.datesRunning = false;
+    }
   }
 
   async bulkDownload(files) {
@@ -1407,12 +1510,6 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
             await this.save();
           })
         );
-        row.addText((t) =>
-          t.setPlaceholder('topics: obsidian, ai').setValue(src.topics || '').onChange(async (v) => {
-            src.topics = v.trim();
-            await this.save();
-          })
-        );
         row.addExtraButton((b) =>
           b.setIcon('trash').setTooltip('Remove').onClick(async () => {
             s.sources.splice(i, 1);
@@ -1424,7 +1521,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       new Setting(srcBox)
         .addButton((b) =>
           b.setButtonText('Add source').onClick(async () => {
-            s.sources.push({ target: '', note: '', topics: '' });
+            s.sources.push({ target: '', note: '' });
             await this.save();
             renderSources();
           })
@@ -1668,6 +1765,34 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       .addText((t) =>
         t.setValue(s.noteNameTemplate).onChange(async (v) => {
           s.noteNameTemplate = v.trim() || DEFAULT_SETTINGS.noteNameTemplate;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Fill publish dates after a sync')
+      .setDesc(
+        'The upload date is not in the fast listing a sync uses, so it is fetched once the ' +
+          'notes exist. Skipped entirely when every note already has one, so re-syncing costs ' +
+          'nothing. Turn off if you would rather run it by hand.'
+      )
+      .addToggle((t) =>
+        t.setValue(s.fillDatesAfterSync !== false).onChange(async (v) => {
+          s.fillDatesAfterSync = v;
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Playlist note name')
+      .setDesc(
+        'Placeholders: {{channel}} is the playlist owner, {{title}} its title. A per-source ' +
+          'playlist note name overrides this. Changing it does not rename playlist notes you ' +
+          'already have \u2014 rename those in Obsidian first so the yt-playlist links follow.'
+      )
+      .addText((t) =>
+        t.setValue(s.playlistNoteNameTemplate).onChange(async (v) => {
+          s.playlistNoteNameTemplate = v.trim() || DEFAULT_SETTINGS.playlistNoteNameTemplate;
           await this.save();
         })
       );

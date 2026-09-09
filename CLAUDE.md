@@ -32,8 +32,13 @@ nothing. This looks like an inconsistency worth tidying. It is not.
 **Enumeration used to pass `runYtDlp(args, 0)`.** Node reads `timeout: 0` as
 *never*, so a hang there could not recover, and nothing was logged after the
 command on any path — "hung", "returned nothing" and "worked perfectly" were
-indistinguishable in the console. It now has a 10-minute ceiling and logs its exit
+indistinguishable in the console. It has a 10-minute ceiling and logs its exit
 code and stdout size. Keep both.
+
+Worth knowing how that broke once already: 0.6.0 restructured the two passes and
+the fix ended up in `hydrate()`, which nothing called, while the live
+`enumerate()` was left on a 3-minute timeout and logged nothing after the
+command. This file claimed otherwise for four versions. Restored in 1.3.0.
 
 **`dl-ed` and `dl-all` are claims, not evidence.** Whether a download happens is
 decided by looking for the file **on disk**. A box ticked by hand, or one left
@@ -70,10 +75,30 @@ punctuation, so a gap in cue timing is the only signal a sentence ended. 1.4s
 starts a new paragraph, with a 25s cap. A fixed 60s window ran three separate
 points together in testing.
 
-**`topic` is written once at creation and never again**, so hand-sorting survives
-every later sync. Provenance is refreshed; judgment is left alone. (`topic` is no
-longer in the video template but the setting still exists — it configures nothing
-and should be removed.)
+**`published` cannot come from enumeration, so it is filled afterwards.**
+`--flat-playlist` returns `timestamp` and `release_timestamp` as `null` and has no
+`upload_date` at all — measured, not assumed. The date needs a full extraction.
+Do not add one to `enumerate()`: that is the two-pass sync 0.6.0 removed, and it
+is what used to stall on a long playlist.
+
+Instead `run()` calls `fillPlaylistDates` **after** the notes are written, so the
+notes exist and are usable before the slow part starts. Setting:
+**fillDatesAfterSync**. It is also written free by `hydrateOne`, which already had
+`upload_date` in hand.
+
+**That pass fetches only the notes missing a date, by their own addresses** —
+`hydrate()` takes either a playlist or an array of video URLs. Do not "simplify"
+it back to passing the playlist: at ~2.3s a video, filling the three videos added
+since last week would re-extract the entire list.
+
+**Sync hands that pass its own `byId` map and playlist address.** Rebuilding them
+from `metadataCache` looks tidier and is wrong: a note created moments earlier is
+not in the cache yet, so the lookup comes back empty for exactly the new notes the
+pass exists to fill.
+
+**`topic` was removed in 1.3.0.** The old note here claimed the setting configured
+nothing; that was wrong. It was still writing `topic` on playlist notes, so removing
+it changed behaviour rather than deleting dead code. All four call sites are gone.
 
 ## The note templates
 

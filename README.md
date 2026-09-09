@@ -42,15 +42,16 @@ dl-ed: false
 duration: 22
 url: "[Link](https://www.youtube.com/watch?v=...)"
 banner: "[[Alex Ziskind — Framework 13 Pro.jpg|Thumbnail]]"
-channel: "[[Alex Ziskind]]"
 yt-playlist:
   - "[[Sylvie — Framework]]"
+channel: "[[Alex Ziskind]]"
+published: 2024-03-11
 tags:
   - youtube-video
 ---
 ```
 
-`duration` is whole minutes rounded up, so it sorts. `dl-ed` records whether the media is on disk.
+`duration` is whole minutes rounded up, so it sorts. `dl-ed` records whether the media is on disk. `published` is the video's upload date as `YYYY-MM-DD`; see below for why it is not filled by sync.
 
 ## Downloading media
 
@@ -72,9 +73,29 @@ Some details that matter:
 
 Thumbnails and media each offer the same choices as Obsidian's own attachment setting: vault folder, same folder as the note, a subfolder under it, or a path you name. Both default to a `Materials` subfolder. The media path may be absolute, so downloads can land outside the vault.
 
-## `topic` and hand-sorting
+## Note names
 
-Sync writes `yt-playlist`, `url`, `channel` and `duration` on every run. It writes `topic` **once**, at creation, and never touches it again — so if you sort videos by hand into topics, re-syncing will not undo it. Provenance is refreshed; judgment is left alone.
+Video notes are named from **Note name**, default `{{channel}} — {{title}}`. Playlist notes have their own setting, **Playlist note name**, default `{{channel}} – {{title}}`, where `{{channel}}` is the playlist's *owner* — so a playlist called `Writing 1` owned by `Sylvie` becomes `Sylvie – Writing 1`.
+
+A per-source playlist note name feeds `{{title}}` rather than replacing the whole name, because yt-dlp's title for a shortcut like Watch Later is not what you want to link to — that is a better title, not a reason to drop the owner. Set the template to `{{title}}` alone if you want the literal name back.
+
+**Changing the template renames playlist notes, so do it deliberately.** The name is the note's path, the folder is named from it too, and every video note's `yt-playlist` links to it. Nothing is renamed for you: the next sync creates a note at the new path and leaves the old one behind with the links still pointing at it. Rename the playlist note *and* its folder in Obsidian first — that updates every link — then sync.
+
+## Publish dates
+
+`published` holds the video's upload date as `YYYY-MM-DD`, which sorts correctly in Bases as plain text.
+
+**Sync cannot fill it.** Sync is one `--flat-playlist` call, and that call returns `timestamp` and `release_timestamp` as `null` with no `upload_date` at all — the date simply is not in the cheap listing. Getting it means a full extraction per video, and making sync do that is what the two-pass design was removed to avoid.
+
+So it is filled after the notes exist rather than while they are being listed:
+
+- **Automatically, at the end of a sync.** The notes are written and usable first, then the dates are fetched. If every note already has one the pass is skipped without calling yt-dlp at all, so re-syncing a playlist costs nothing. Turn it off with **Fill publish dates after a sync** if you would rather do it by hand.
+- **Fill publish dates for this playlist** — command palette or right-click a playlist note — does the same thing on demand. Around 2.3 seconds a video.
+- **Fetch details and transcript for this note** writes it as a side effect. That call already fetches full metadata, so the date costs nothing extra.
+
+Notes that already carry the right date are left untouched rather than rewritten, so a run does not churn modification times across the vault.
+
+New notes are created without the property. It appears in its configured position the moment a date is known, the same way `media` appears after a download.
 
 ## Relationship to ARCH After Clipping
 
