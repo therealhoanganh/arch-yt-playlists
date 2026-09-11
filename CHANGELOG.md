@@ -3,7 +3,7 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## Unreleased
+## 1.4.0 — current
 
 - **Channel notes.** A *Channels* list in settings — one `@handle` or channel
   URL per line, `#` lines ignored — and a *Sync channels* command that writes
@@ -30,7 +30,7 @@
 - The *Video note property order* description now says what the code has
   always done: a hand-added property listed there is placed there.
 
-## 1.3.1 — current
+## 1.3.1
 
 - **The new thumbnail default did not survive a fresh install.** A migration added in 0.14.0 maps a vault predating `thumbnailLocationMode` onto subfolder mode, so nothing moves. It fired whenever the setting was absent from saved data — which includes an install with no saved data at all, where it overwrote the shipped default with `subfolder` and blanked the specified folder. It now runs only when there is a saved config to migrate. A vault that predates the setting still maps to its old subfolder exactly as before.
 
