@@ -3,6 +3,33 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
+## Unreleased
+
+- **Channel notes.** A *Channels* list in settings — one `@handle` or channel
+  URL per line, `#` lines ignored — and a *Sync channels* command that writes
+  one note per channel: `url`, `icon`, `banner`, `tags: yt-channel`, nothing
+  else. The note is named after the channel, so the `channel: [[Name]]` link
+  every video note already carries resolves to it. Metadata comes from one
+  yt-dlp call with `--playlist-items 0`, which returns the channel's own facts
+  without listing any videos, about 1.5 s a channel. The icon is the largest
+  square thumbnail and the banner the widest strip, as YouTube shows them on a
+  desktop; both are encoded to WebP at quality 0.90 in-plugin, so the link is
+  right the first time rather than waiting for ARCH Images Plus to convert it.
+  A channel with no banner set gets no `banner` property and a log line.
+- Re-syncing goes through `processFrontMatter`: a property added by hand and
+  the body survive, tags are merged rather than replaced, and an image already
+  on disk is kept unless *Re-download icons and banners* is on.
+- The *Sync one playlist by URL* prompt accepts a channel address too.
+- **After Clipping needs its new `otherArchTags` setting** (`yt-channel`) to
+  leave these notes alone — a channel note has a `url` and no marker property,
+  and yt-dlp given a channel URL downloads the channel. Ships in After
+  Clipping's next release.
+- **Default video tag is `yt-video`** rather than `youtube-video`, matching
+  `yt-channel` and `yt-playlist`. A saved setting is untouched; change it by
+  hand if you want the new name.
+- The *Video note property order* description now says what the code has
+  always done: a hand-added property listed there is placed there.
+
 ## 1.3.1 — current
 
 - **The new thumbnail default did not survive a fresh install.** A migration added in 0.14.0 maps a vault predating `thumbnailLocationMode` onto subfolder mode, so nothing moves. It fired whenever the setting was absent from saved data — which includes an install with no saved data at all, where it overwrote the shipped default with `subfolder` and blanked the specified folder. It now runs only when there is a saved config to migrate. A vault that predates the setting still maps to its old subfolder exactly as before.

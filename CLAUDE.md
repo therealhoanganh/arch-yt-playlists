@@ -117,6 +117,48 @@ Videos belonging to a playlist are found by **resolving `yt-playlist` links back
 to the playlist note**, not by scanning its folder. A video can belong to several
 playlists while living in one folder, and links survive a rename.
 
+## Channel notes
+
+`syncChannels` is the equivalent of ARCH X Twitter's bulk list, and it is
+shaped the same way on purpose: a textarea of addresses in settings rather than
+rows, a note per channel named after the channel, icon and banner as aliased
+wikilinks, hand-added properties carried across. Read that plugin's
+`writeProfileNote` before changing this one; they should stay recognisably the
+same feature.
+
+**`--playlist-items 0` is what makes a channel cheap.** yt-dlp treats a channel
+as a playlist; with no items requested it still returns the channel's own
+metadata — `channel`, `uploader_id` (the `@handle`), `channel_follower_count`
+and a `thumbnails` list — in about 1.5 s. Without it, a channel with two
+thousand videos enumerates two thousand videos.
+
+**Which thumbnail is which.** The list carries the avatar at several square
+sizes plus an `avatar_uncropped`, and the banner at several wide sizes plus a
+`banner_uncropped`. The uncropped entries have no `width`/`height`. The
+uncropped banner is a 16:9 image (2560×1440 on StarTalk) that YouTube crops
+differently per device — it is not the banner as seen on the channel page, which
+is the widest strip (2560×424). `channelFromJson` takes the largest square and
+the widest strip and falls back to the uncropped ones. A channel with no banner
+(AI Engineer, at the time of writing) returns only avatar entries.
+
+**Images are encoded to WebP here, not left to ARCH Images Plus.** The note is
+written moments after the image; a link written as `.jpg` to a file that
+becomes `.webp` a second later is a race. `lib/image.js` is a copy of X
+Twitter's, renderer-only (OffscreenCanvas), and Images Plus ignores a file that
+is already WebP.
+
+**Channel notes have no marker property, by design** — `url`, `icon`, `banner`,
+`tags` and nothing else, matching the hand-made ones. That means After Clipping
+cannot recognise them by `otherArchKeys`; it recognises them by tag,
+`otherArchTags`, default `yt-channel`. **If the channel tag changes, After
+Clipping's setting must change with it**, or every new channel note sends
+yt-dlp after the whole channel.
+
+**An existing note goes through `processFrontMatter`**, which keeps every
+property it is not told about and never touches the body; tags are merged. The
+create path uses `buildFrontmatter`, which skips empty values, so a channel with
+no banner simply has no `banner` line.
+
 ## Coupling to ARCH After Clipping
 
 Separate plugin, separate repo, no shared code. The split is by workflow —
@@ -124,7 +166,8 @@ reactive versus on-demand — not by site. Almost nothing in After Clipping is
 YouTube-specific, and moving media handling there would break its main use case.
 
 The one link: this plugin writes `yt-playlist` on video notes and `dl-all` on
-playlist notes, and After Clipping skips any note carrying either. Before that
+playlist notes, and tags channel notes `yt-channel`; After Clipping skips any
+note carrying one of those. Before that
 existed, After Clipping renamed every note here on every sync — including renaming
 the playlist note itself. **If you rename those properties, After Clipping's
 `otherArchKeys` setting must change to match.**

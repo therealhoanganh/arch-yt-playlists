@@ -1,6 +1,6 @@
 'use strict';
 
-const { Plugin, PluginSettingTab, Setting, Notice, Modal, TFolder, normalizePath } = require('obsidian');
+const { Plugin, PluginSettingTab, Setting, Notice, Modal, TFile, TFolder, normalizePath, requestUrl } = require('obsidian');
 const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -9,7 +9,7 @@ const os = require('os');
 const DEFAULT_SETTINGS = {
   // where notes land
   archiveRoot: 'YouTube/Playlists',
-  tags: ['youtube-video'],
+  tags: ['yt-video'],
   playlistTags: ['youtube-playlist'],
 
   // Frontmatter order, as a plain list. A name not in the list is appended, and
@@ -18,6 +18,24 @@ const DEFAULT_SETTINGS = {
   videoNoteOrder: 'dl-ed, duration, url, banner, yt-playlist, channel, media, published, tags',
   playlistNoteOrder: 'dl-all, count, url, tags',
   sources: [{ target: 'Watch Later', note: 'Watch Later' }],
+
+  // Channel notes. The list is a plain block of text, one channel per line,
+  // the way ARCH X Twitter keeps its bulk list: rows per channel would make
+  // the tab unusable at a hundred channels.
+  channelList: '',
+  channelListOpen: false,
+  channelTags: ['yt-channel'],
+  channelNoteOrder: 'url, icon, banner, tags',
+  channelLocationMode: 'specified', // vault | root | subfolder | specified
+  channelSubfolder: 'Channels',
+  channelFolder: 'YouTube/Channels',
+  channelImageLocationMode: 'subfolder', // vault | same | subfolder | specified
+  channelImageSubfolder: 'Images',
+  channelImageFolder: '',
+  channelIconTemplate: '{{channel}} Icon',
+  channelBannerTemplate: '{{channel}} Banner',
+  channelImageFormat: 'webp', // webp | keep
+  refreshChannelImages: false,
 
   // what to fetch
   transcript: true,
@@ -70,6 +88,25 @@ function splitList(raw) {
     .split(/[,\n]/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+// A folder setting as typed, made safe: backslashes, empty and "." segments
+// and characters no filesystem here accepts are removed.
+function cleanFolder(raw) {
+  return String(raw || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((seg) => (seg === '.' || seg === '' ? '' : seg.replace(/[\\/:*?"<>|]/g, ' ').trim()))
+    .filter(Boolean)
+    .join('/');
+}
+
+function extFromType(type) {
+  const t = String(type || '').toLowerCase();
+  if (t.includes('webp')) return '.webp';
+  if (t.includes('png')) return '.png';
+  if (t.includes('gif')) return '.gif';
+  return '.jpg';
 }
 
 module.exports = class YouTubeArchiver extends Plugin {
@@ -192,8 +229,13 @@ module.exports = class YouTubeArchiver extends Plugin {
     });
     this.addCommand({
       id: 'sync-prompt',
-      name: 'Sync one playlist by URL',
+      name: 'Sync one playlist or channel by URL',
       callback: () => this.syncPrompt(),
+    });
+    this.addCommand({
+      id: 'sync-channels',
+      name: 'Sync channels',
+      callback: () => this.syncChannels(),
     });
   }
 
@@ -357,10 +399,10 @@ module.exports = class YouTubeArchiver extends Plugin {
     const plugin = this;
     class PromptModal extends Modal {
       onOpen() {
-        this.titleEl.setText('Sync a playlist');
+        this.titleEl.setText('Sync a playlist or channel');
         const input = this.contentEl.createEl('input', {
           type: 'text',
-          attr: { placeholder: 'Playlist URL, playlist id, or Watch Later', style: 'width:100%;' },
+          attr: { placeholder: 'Playlist URL, playlist id, Watch Later, or a channel URL / @handle', style: 'width:100%;' },
         });
         const row = this.contentEl.createDiv({
           attr: { style: 'display:flex; gap:8px; margin-top:12px;' },
@@ -370,6 +412,14 @@ module.exports = class YouTubeArchiver extends Plugin {
           const target = input.value.trim();
           this.close();
           if (!target) return;
+          // A channel address is the other thing a person pastes here. A bare
+          // word is tried as a playlist shortcut first (Watch Later, Liked).
+          const { channelUrlFromInput, resolveSourceTarget } = plugin.lib();
+          const isShortcut = resolveSourceTarget(target) !== target;
+          if (!isShortcut && /@|\/channel\/|\/c\/|\/user\//.test(target) && channelUrlFromInput(target)) {
+            await plugin.syncOneChannel(target);
+            return;
+          }
           await plugin.archiver().run({ target, note: target });
         };
         input.focus();
@@ -382,6 +432,237 @@ module.exports = class YouTubeArchiver extends Plugin {
       }
     }
     new PromptModal(this.app).open();
+  }
+
+  /* ---------------- channels ---------------- */
+
+  // The list as typed, reduced to yt-dlp addresses. Lines that are not a
+  // channel are reported rather than silently dropped: a watch URL pasted here
+  // by mistake should say so in the log.
+  channelTargets() {
+    const { channelUrlFromInput } = this.lib();
+    const seen = new Set();
+    const targets = [];
+    const rejected = [];
+    for (const line of String(this.settings.channelList || '').split('\n')) {
+      const raw = line.trim();
+      if (!raw || raw.startsWith('#')) continue;
+      const url = channelUrlFromInput(raw);
+      if (!url) { rejected.push(raw); continue; }
+      if (seen.has(url.toLowerCase())) continue;
+      seen.add(url.toLowerCase());
+      targets.push(url);
+    }
+    return { targets, rejected };
+  }
+
+  async syncChannels() {
+    const { targets, rejected } = this.channelTargets();
+    for (const r of rejected) this.log('not a channel address, skipped:', r);
+    if (!targets.length) {
+      new Notice('Add at least one channel in ARCH YT Playlists settings.', 10000);
+      return;
+    }
+    if (this.syncingChannels) {
+      new Notice('A channel sync is already running.');
+      return;
+    }
+    this.syncingChannels = true;
+    this.aborted = false;
+    const started = Date.now();
+    let created = 0, updated = 0, failed = 0;
+    const n = this.notice(`Syncing ${targets.length} channel${targets.length === 1 ? '' : 's'}...`, 0);
+    this.log(`syncing ${targets.length} channels into ${this.resolveChannelFolder() || 'the vault root'}`);
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        this.checkAborted();
+        n.setMessage(`Channel ${i + 1} of ${targets.length}: ${targets[i].replace(/^https:\/\/www\.youtube\.com\//, '')}`);
+        try {
+          const r = await this.syncChannel(targets[i]);
+          if (r.created) created++; else updated++;
+        } catch (e) {
+          if (String(e && e.message) === '__aborted__') throw e;
+          failed++;
+          console.error('[ArchYTPlaylists] channel failed:', targets[i], e);
+        }
+      }
+    } catch (e) {
+      if (String(e && e.message) === '__aborted__') this.log('channel sync stopped because the plugin was disabled');
+      else console.error('[ArchYTPlaylists] channel sync failed:', e);
+    } finally {
+      this.syncingChannels = false;
+      n.hide();
+    }
+    const msg = `Channels: ${created} new, ${updated} updated, ${failed} failed, ${Math.round((Date.now() - started) / 1000)}s.`;
+    this.log(msg);
+    new Notice(msg, 10000);
+  }
+
+  // One channel from the prompt. Not added to the list: the list is what gets
+  // re-synced, and a one-off is a one-off.
+  async syncOneChannel(target) {
+    const n = this.notice('Fetching channel...', 0);
+    try {
+      const r = await this.syncChannel(target);
+      n.hide();
+      new Notice(`${r.created ? 'Created' : 'Updated'} ${r.notePath}`, 8000);
+    } catch (e) {
+      n.hide();
+      console.error('[ArchYTPlaylists] channel failed:', target, e);
+      new Notice(`Channel failed: ${e.message}`, 12000);
+    }
+  }
+
+  // --playlist-items 0 is what makes this cheap: yt-dlp returns the channel's
+  // own metadata -- name, handle, avatar and banner addresses -- without
+  // listing a single video. Measured at about 1.5 s a channel.
+  async syncChannel(target) {
+    const { channelUrlFromInput, channelFromJson, channelImageStem, safeFileName } = this.lib();
+    const url = channelUrlFromInput(target) || target;
+    const r = await this.runYtDlp(['--dump-single-json', '--playlist-items', '0', '--no-warnings', url], 120000);
+    if (r.code !== 0 || !r.stdout.trim()) {
+      const last = String(r.stderr || '').trim().split('\n').pop();
+      throw new Error(`yt-dlp exit ${r.code}: ${last || 'no output'}`);
+    }
+    let json;
+    try { json = JSON.parse(r.stdout); } catch (_) { throw new Error('yt-dlp returned something that is not JSON'); }
+    const ch = channelFromJson(json);
+    if (!ch.name) throw new Error('no channel name in the metadata');
+
+    const folder = this.resolveChannelFolder();
+    if (folder) await this.ensureFolder(folder);
+    // Named after the channel, and nothing else: that is what makes the
+    // channel: [[Name]] link every video note already carries resolve here.
+    const notePath = normalizePath(`${folder ? folder + '/' : ''}${safeFileName(ch.name)}.md`);
+    const imageFolder = this.resolveChannelImageFolder(folder);
+    if (imageFolder) await this.ensureFolder(imageFolder);
+
+    const images = { icon: '', banner: '' };
+    for (const [key, imgUrl, template, fallback, alias] of [
+      ['icon', ch.icon, this.settings.channelIconTemplate, '{{channel}} Icon', 'Icon'],
+      ['banner', ch.banner, this.settings.channelBannerTemplate, '{{channel}} Banner', 'Banner'],
+    ]) {
+      if (!imgUrl) { this.log(`${ch.name}: no ${key} on YouTube`); continue; }
+      try {
+        const stem = safeFileName(channelImageStem(template, ch, fallback));
+        const file = await this.saveChannelImage(imgUrl, imageFolder, stem);
+        if (file) images[key] = this.embedFor(file, notePath, alias);
+      } catch (e) {
+        // A missing picture is not a reason to lose the note.
+        this.log(`${ch.name}: ${key} failed: ${e.message}`);
+      }
+    }
+
+    const created = await this.writeChannelNote(ch, images, notePath);
+    this.log(`${created ? 'created' : 'updated'} ${notePath}` +
+      (images.icon ? '' : ' (no icon)') + (images.banner ? '' : ' (no banner)'));
+    return { created, notePath };
+  }
+
+  existingImage(folder, stem) {
+    for (const ext of ['.webp', '.jpg', '.jpeg', '.png']) {
+      const hit = this.app.vault.getAbstractFileByPath(normalizePath(folder ? `${folder}/${stem}${ext}` : `${stem}${ext}`));
+      if (hit instanceof TFile) return hit;
+    }
+    return null;
+  }
+
+  // Encoded to WebP here rather than left for ARCH Images Plus to convert on
+  // arrival: the note is written moments after the image, and a link written
+  // as .jpg to a file that becomes .webp a second later is a race this plugin
+  // should not be entering. Quality 0.90 for the same reason Images Plus uses
+  // it: the original is not kept.
+  async saveChannelImage(url, folder, stem) {
+    const existing = this.existingImage(folder, stem);
+    if (existing && !this.settings.refreshChannelImages) {
+      this.log('image already on disk, kept:', existing.path);
+      return existing;
+    }
+    // requestUrl is Obsidian's own client: not subject to the renderer's CORS
+    // rules, and it follows redirects.
+    const res = await requestUrl({ url, throw: false });
+    if (res.status !== 200 || !res.arrayBuffer || !res.arrayBuffer.byteLength) throw new Error(`HTTP ${res.status}`);
+    const type = (res.headers && (res.headers['content-type'] || res.headers['Content-Type'])) || 'image/jpeg';
+    let bytes = new Uint8Array(res.arrayBuffer);
+    let ext = extFromType(type);
+    if (this.settings.channelImageFormat === 'webp' && ext !== '.webp') {
+      try {
+        const { encodeWebp } = this.lib();
+        const encoded = await encodeWebp(new Blob([res.arrayBuffer], { type }), 0.9);
+        if (encoded.data) { bytes = encoded.data; ext = '.webp'; }
+        else this.log('kept the original format, WebP would be larger:', stem);
+      } catch (e) {
+        this.log('WebP encode failed, keeping the original:', e.message);
+      }
+    }
+    const target = normalizePath(folder ? `${folder}/${stem}${ext}` : `${stem}${ext}`);
+    const already = this.app.vault.getAbstractFileByPath(target);
+    if (already instanceof TFile) {
+      await this.app.vault.modifyBinary(already, bytes);
+      this.log('refreshed', target);
+      return already;
+    }
+    await this.app.vault.createBinary(target, bytes);
+    if (existing) this.log(`refreshed as ${target}; the old ${existing.path} is left for you to remove`);
+    else this.log('saved', target, `${Math.round(bytes.length / 1024)} KB`);
+    const file = this.app.vault.getAbstractFileByPath(target);
+    return file instanceof TFile ? file : null;
+  }
+
+  embedFor(file, fromNotePath, alias) {
+    let link = file.path;
+    try {
+      link = this.app.metadataCache.fileToLinktext(file, fromNotePath || '', true);
+    } catch (_) { /* fall back to the full path */ }
+    return `[[${link}|${alias}]]`;
+  }
+
+  // Rewritten on every sync, and these notes are where a person puts things
+  // the sync cannot know -- a ranking, extra tags, a body. An existing note
+  // goes through processFrontMatter, which keeps every property it is not
+  // told about and never touches the body; tags are merged, not replaced. An
+  // image that was not fetched this run leaves whatever the property had.
+  async writeChannelNote(ch, images, notePath) {
+    const { buildFrontmatter } = this.lib();
+    const tags = (this.settings.channelTags || []).map((t) => String(t).replace(/^#+/, '').trim()).filter(Boolean);
+    const fields = { url: `[Link](${ch.url})`, icon: images.icon, banner: images.banner, tags };
+
+    const existing = this.app.vault.getAbstractFileByPath(notePath);
+    if (existing instanceof TFile) {
+      await this.app.fileManager.processFrontMatter(existing, (fm) => {
+        fm.url = fields.url;
+        if (fields.icon) fm.icon = fields.icon;
+        if (fields.banner) fm.banner = fields.banner;
+        const had = [].concat(fm.tags ?? []).map((t) => String(t).replace(/^#+/, '').trim()).filter(Boolean);
+        fm.tags = [...had, ...tags.filter((t) => !had.includes(t))];
+        this.applyOrder(fm, this.settings.channelNoteOrder);
+      });
+      return false;
+    }
+    await this.app.vault.create(notePath, buildFrontmatter(this.applyOrder(fields, this.settings.channelNoteOrder)));
+    return true;
+  }
+
+  // Where channel notes go. 'root' and 'subfolder' are relative to the archive
+  // root, the folder playlists land in; the default is a sibling of it.
+  resolveChannelFolder() {
+    const mode = this.settings.channelLocationMode || 'specified';
+    const root = cleanFolder(this.settings.archiveRoot);
+    if (mode === 'vault') return '';
+    if (mode === 'root') return root;
+    if (mode === 'specified') return cleanFolder(this.settings.channelFolder) || root;
+    const sub = cleanFolder(this.settings.channelSubfolder || 'Channels');
+    return root ? `${root}/${sub}` : sub;
+  }
+
+  // Where a channel's icon and banner go, relative to the channel note.
+  resolveChannelImageFolder(noteFolder) {
+    const mode = this.settings.channelImageLocationMode || 'subfolder';
+    if (mode === 'vault') return '';
+    if (mode === 'same') return noteFolder;
+    if (mode === 'specified') return cleanFolder(this.settings.channelImageFolder) || noteFolder;
+    const sub = cleanFolder(this.settings.channelImageSubfolder || 'Images');
+    return sub ? (noteFolder ? `${noteFolder}/${sub}` : sub) : noteFolder;
   }
 
   /* ---------------- vault helpers ---------------- */
@@ -1315,6 +1596,7 @@ module.exports = class YouTubeArchiver extends Plugin {
       this.settings.sources = DEFAULT_SETTINGS.sources.map((s) => ({ ...s }));
     }
     if (!Array.isArray(this.settings.tags)) this.settings.tags = [];
+    if (!Array.isArray(this.settings.channelTags)) this.settings.channelTags = DEFAULT_SETTINGS.channelTags.slice();
     // Older vaults stored a bare subfolder name, which is what 'subfolder' means.
     // Only when there is a saved config predating the setting: on a fresh install
     // saved is empty, there is nothing to migrate, and running this would stomp
@@ -1546,11 +1828,174 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     };
     renderSources();
 
+    /* ---- channels ---- */
+    new Setting(containerEl).setName('Channels').setHeading();
+
+    const { targets: channelTargets, rejected: channelRejected } = this.plugin.channelTargets();
+    containerEl.createEl('p', {
+      text:
+        'One channel per line: @handle or any channel URL. Lines starting with # are ignored, so you can keep notes in here. ' +
+        'Each channel becomes one note named after the channel, with its icon and banner, so the channel property on ' +
+        'video notes links to it. Re-syncing keeps anything you added to the note by hand.',
+      attr: { style: 'font-size:var(--font-ui-smaller); opacity:.75;' },
+    });
+
+    // Hundreds of rows is what made X Twitter's tab unusable, so the list is
+    // one textarea behind a disclosure that remembers whether it was open.
+    const details = containerEl.createEl('details');
+    details.open = !!s.channelListOpen;
+    const summaryText = channelTargets.length
+      ? `Show the list (${channelTargets.length} channel${channelTargets.length === 1 ? '' : 's'}` +
+        (channelRejected.length ? `, ${channelRejected.length} line${channelRejected.length === 1 ? '' : 's'} not a channel)` : ')')
+      : 'Show the list (empty)';
+    details.createEl('summary', { text: summaryText });
+    details.addEventListener('toggle', async () => { s.channelListOpen = details.open; await this.save(); });
+    const ta = details.createEl('textarea');
+    ta.value = s.channelList || '';
+    ta.rows = 12;
+    ta.spellcheck = false;
+    ta.placeholder = '@StarTalk\nhttps://www.youtube.com/@aiDotEngineer';
+    ta.style.width = '100%';
+    ta.style.fontFamily = 'var(--font-monospace)';
+    let typing = null;
+    ta.addEventListener('input', () => {
+      // Debounced: saving on every keystroke of a long list is pointless work,
+      // and re-rendering the tab mid-edit would steal focus.
+      clearTimeout(typing);
+      typing = setTimeout(async () => { s.channelList = ta.value; await this.save(); }, 400);
+    });
+    ta.addEventListener('blur', async () => { s.channelList = ta.value; await this.save(); this.display(); });
+
+    new Setting(containerEl)
+      .addButton((b) => b.setButtonText('Sync channels now').setCta().onClick(() => this.plugin.syncChannels()));
+
+    new Setting(containerEl)
+      .setName('Channel note location')
+      .setDesc('Root and subfolder are relative to the archive root the playlists use.')
+      .addDropdown((d) =>
+        d
+          .addOption('vault', 'Vault folder')
+          .addOption('root', 'The archive root')
+          .addOption('subfolder', 'In subfolder under the archive root')
+          .addOption('specified', 'In the folder specified below')
+          .setValue(s.channelLocationMode || 'specified')
+          .onChange(async (v) => {
+            s.channelLocationMode = v;
+            await this.save();
+            this.display();
+          })
+      );
+    if (s.channelLocationMode === 'subfolder') {
+      new Setting(containerEl)
+        .setName('Channel subfolder name')
+        .addText((t) =>
+          t.setValue(s.channelSubfolder).onChange(async (v) => {
+            s.channelSubfolder = v.trim() || 'Channels';
+            await this.save();
+          })
+        );
+    }
+    if ((s.channelLocationMode || 'specified') === 'specified') {
+      new Setting(containerEl)
+        .setName('Channel folder')
+        .setDesc('Path from the vault root.')
+        .addText((t) =>
+          t.setValue(s.channelFolder).onChange(async (v) => {
+            s.channelFolder = v.trim();
+            await this.save();
+          })
+        );
+    }
+
+    new Setting(containerEl)
+      .setName('Channel image location')
+      .setDesc('Where the icon and banner go. Same folder and subfolder are relative to the channel note.')
+      .addDropdown((d) =>
+        d
+          .addOption('vault', 'Vault folder')
+          .addOption('same', 'Same folder as the note')
+          .addOption('subfolder', 'In subfolder under the note')
+          .addOption('specified', 'In the folder specified below')
+          .setValue(s.channelImageLocationMode || 'subfolder')
+          .onChange(async (v) => {
+            s.channelImageLocationMode = v;
+            await this.save();
+            this.display();
+          })
+      );
+    if ((s.channelImageLocationMode || 'subfolder') === 'subfolder') {
+      new Setting(containerEl)
+        .setName('Channel image subfolder name')
+        .addText((t) =>
+          t.setValue(s.channelImageSubfolder).onChange(async (v) => {
+            s.channelImageSubfolder = v.trim() || 'Images';
+            await this.save();
+          })
+        );
+    }
+    if (s.channelImageLocationMode === 'specified') {
+      new Setting(containerEl)
+        .setName('Channel image folder')
+        .setDesc('Path from the vault root.')
+        .addText((t) =>
+          t.setValue(s.channelImageFolder).onChange(async (v) => {
+            s.channelImageFolder = v.trim();
+            await this.save();
+          })
+        );
+    }
+
+    new Setting(containerEl)
+      .setName('Icon and banner file names')
+      .setDesc('Placeholders: {{channel}} is the channel name, {{handle}} its @handle.')
+      .addText((t) => t.setPlaceholder('{{channel}} Icon').setValue(s.channelIconTemplate).onChange(async (v) => {
+        s.channelIconTemplate = v.trim() || DEFAULT_SETTINGS.channelIconTemplate;
+        await this.save();
+      }))
+      .addText((t) => t.setPlaceholder('{{channel}} Banner').setValue(s.channelBannerTemplate).onChange(async (v) => {
+        s.channelBannerTemplate = v.trim() || DEFAULT_SETTINGS.channelBannerTemplate;
+        await this.save();
+      }));
+
+    new Setting(containerEl)
+      .setName('Channel image format')
+      .setDesc('YouTube serves JPEG. WebP at quality 0.90 is about half the size and is what the rest of the vault uses.')
+      .addDropdown((d) =>
+        d.addOption('webp', 'WebP').addOption('keep', 'Keep what YouTube serves')
+          .setValue(s.channelImageFormat || 'webp')
+          .onChange(async (v) => { s.channelImageFormat = v; await this.save(); })
+      );
+
+    new Setting(containerEl)
+      .setName('Re-download icons and banners on every sync')
+      .setDesc('Off means an image already on disk is left alone, which is what makes a re-run of every channel cheap. Turn it on once to pick up changed pictures, then turn it off.')
+      .addToggle((t) => t.setValue(!!s.refreshChannelImages).onChange(async (v) => { s.refreshChannelImages = v; await this.save(); }));
+
+    new Setting(containerEl)
+      .setName('Channel note tags')
+      .setDesc('Comma-separated. ARCH After Clipping leaves notes tagged yt-channel alone; change both if you change this.')
+      .addText((t) =>
+        t.setValue((s.channelTags || []).join(', ')).onChange(async (v) => {
+          s.channelTags = splitList(v);
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Channel note property order')
+      .setDesc('Comma-separated, same rules as the video note order.')
+      .addText((t) =>
+        t.setValue(s.channelNoteOrder).onChange(async (v) => {
+          s.channelNoteOrder = v.trim() || DEFAULT_SETTINGS.channelNoteOrder;
+          await this.save();
+        })
+      );
+
     new Setting(containerEl).setName('Output').setHeading();
 
     new Setting(containerEl)
       .setName('Video note property order')
-      .setDesc('Comma-separated. Reorders or drops properties; it cannot add one that is not produced.')
+      .setDesc('Comma-separated. A property you added by hand is placed where you list it, or kept at the end if unlisted; a name the plugin does not produce and the note does not have is skipped.')
       .addText((t) =>
         t.setValue(s.videoNoteOrder).onChange(async (v) => {
           s.videoNoteOrder = v.trim() || DEFAULT_SETTINGS.videoNoteOrder;
