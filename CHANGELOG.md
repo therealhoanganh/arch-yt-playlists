@@ -3,7 +3,14 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.4.1 — current
+## Unreleased
+
+- **A re-sync no longer saves a second thumbnail.** The check looked for
+  `name.jpg`, but ARCH Images Plus converts that to `name.webp` on arrival, so
+  it was never found and each re-sync fetched again and wrote `name 1.webp`.
+  An existing thumbnail is now reused whatever its image extension.
+
+## 1.4.1
 
 - **Default video note order is now `media, channel, yt-playlist, banner, url,
   dl-ed, v-rank, duration, status, published, tags`** — media first, so the
