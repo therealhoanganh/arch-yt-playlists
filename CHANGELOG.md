@@ -3,7 +3,17 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.4.0 — current
+## 1.4.1 — current
+
+- **Default video note order is now `media, channel, yt-playlist, banner, url,
+  dl-ed, v-rank, duration, status, published, tags`** — media first, so the
+  player leads the properties panel. A vault whose saved order is exactly the
+  old default is moved to the new one on load, since that order was never
+  chosen; a customised order is untouched. `v-rank` and `status` are
+  hand-added properties: naming them positions them when present and costs
+  nothing when not.
+
+## 1.4.0
 
 - **Channel notes.** A *Channels* list in settings — one `@handle` or channel
   URL per line, `#` lines ignored — and a *Sync channels* command that writes

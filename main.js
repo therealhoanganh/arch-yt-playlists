@@ -15,7 +15,10 @@ const DEFAULT_SETTINGS = {
   // Frontmatter order, as a plain list. A name not in the list is appended, and
   // a name listed but not produced is skipped, so editing this can reorder or
   // drop a property but cannot invent one.
-  videoNoteOrder: 'dl-ed, duration, url, banner, yt-playlist, channel, media, published, tags',
+  // media first, so the player is the first thing in the properties panel;
+  // v-rank and status are hand-added on the notes this was modelled on, and
+  // naming them here positions them when present and costs nothing when not.
+  videoNoteOrder: 'media, channel, yt-playlist, banner, url, dl-ed, v-rank, duration, status, published, tags',
   playlistNoteOrder: 'dl-all, count, url, tags',
   sources: [{ target: 'Watch Later', note: 'Watch Later' }],
 
@@ -1596,6 +1599,12 @@ module.exports = class YouTubeArchiver extends Plugin {
       this.settings.sources = DEFAULT_SETTINGS.sources.map((s) => ({ ...s }));
     }
     if (!Array.isArray(this.settings.tags)) this.settings.tags = [];
+    // The 1.3.x default put media last, which is where a property added after
+    // sync lands anyway. A vault still on that exact string never chose it, so
+    // it moves to the new default; anything else was typed and stays.
+    if (saved.videoNoteOrder === 'dl-ed, duration, url, banner, yt-playlist, channel, media, published, tags') {
+      this.settings.videoNoteOrder = DEFAULT_SETTINGS.videoNoteOrder;
+    }
     if (!Array.isArray(this.settings.channelTags)) this.settings.channelTags = DEFAULT_SETTINGS.channelTags.slice();
     // Older vaults stored a bare subfolder name, which is what 'subfolder' means.
     // Only when there is a saved config predating the setting: on a fresh install
