@@ -3,8 +3,19 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## Unreleased
+## 1.4.2 — current
 
+- **Default properties for video and channel notes.** New settings taking
+  one `key: value` per line — video notes default to `v-rank: 5` and
+  `status: Watch Later` — written on every new note so the property is there
+  to edit, and added to an existing note that lacks it on the next sync. A
+  value already on a note is never changed; these are starting points for a
+  human judgement, and a sync that reset them would destroy exactly what they
+  hold. Position them with the order setting, whose default already names them.
+- **A saved tag list that is exactly `youtube-video` moves to `yt-video`** on
+  load, the same rule as the order migration. A re-sync renames that tag on
+  existing notes and adds any configured tag a note lacks; tags a person added
+  stay.
 - **A re-sync no longer saves a second thumbnail.** The check looked for
   `name.jpg`, but ARCH Images Plus converts that to `name.webp` on arrival, so
   it was never found and each re-sync fetched again and wrote `name 1.webp`.

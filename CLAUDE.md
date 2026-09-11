@@ -108,6 +108,11 @@ name on the list the plugin does not produce is skipped. The whole object is
 rebuilt in that order on every write, which is what keeps `media` — added after a
 download — from landing at the bottom.
 
+`videoNoteDefaults` and `channelNoteDefaults` are `key: value` lines written on
+creation and added to an existing note that lacks them on re-sync — never
+overwritten, because `v-rank: 5` on a note is a person's judgement the moment
+they change it. The default order names `v-rank` and `status` for this reason.
+
 Four property names are load-bearing and are **not** configurable: `url` (every
 lookup), `yt-playlist` (playlist resolution and cross-plugin ownership), `media`
 (the disk check), and `dl-ed` / `dl-all` (state). Making them configurable means

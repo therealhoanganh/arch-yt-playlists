@@ -20,6 +20,11 @@ const DEFAULT_SETTINGS = {
   // naming them here positions them when present and costs nothing when not.
   videoNoteOrder: 'media, channel, yt-playlist, banner, url, dl-ed, v-rank, duration, status, published, tags',
   playlistNoteOrder: 'dl-all, count, url, tags',
+  // "key: value" per line, written on every new note so the property exists
+  // to be edited, and added to an existing note that lacks it on the next
+  // sync. A value already on a note is never changed.
+  videoNoteDefaults: 'v-rank: 5\nstatus: Watch Later',
+  channelNoteDefaults: '',
   sources: [{ target: 'Watch Later', note: 'Watch Later' }],
 
   // Channel notes. The list is a plain block of text, one channel per line,
@@ -626,10 +631,11 @@ module.exports = class YouTubeArchiver extends Plugin {
   // told about and never touches the body; tags are merged, not replaced. An
   // image that was not fetched this run leaves whatever the property had.
   async writeChannelNote(ch, images, notePath) {
-    const { buildFrontmatter } = this.lib();
+    const { buildFrontmatter, parseDefaults, addMissingDefaults } = this.lib();
     const tags = (this.settings.channelTags || []).map((t) => String(t).replace(/^#+/, '').trim()).filter(Boolean);
     const fields = { url: `[Link](${ch.url})`, icon: images.icon, banner: images.banner, tags };
 
+    const defaults = parseDefaults(this.settings.channelNoteDefaults);
     const existing = this.app.vault.getAbstractFileByPath(notePath);
     if (existing instanceof TFile) {
       await this.app.fileManager.processFrontMatter(existing, (fm) => {
@@ -638,10 +644,12 @@ module.exports = class YouTubeArchiver extends Plugin {
         if (fields.banner) fm.banner = fields.banner;
         const had = [].concat(fm.tags ?? []).map((t) => String(t).replace(/^#+/, '').trim()).filter(Boolean);
         fm.tags = [...had, ...tags.filter((t) => !had.includes(t))];
+        addMissingDefaults(fm, defaults);
         this.applyOrder(fm, this.settings.channelNoteOrder);
       });
       return false;
     }
+    addMissingDefaults(fields, defaults);
     await this.app.vault.create(notePath, buildFrontmatter(this.applyOrder(fields, this.settings.channelNoteOrder)));
     return true;
   }
@@ -1605,6 +1613,12 @@ module.exports = class YouTubeArchiver extends Plugin {
     if (saved.videoNoteOrder === 'dl-ed, duration, url, banner, yt-playlist, channel, media, published, tags') {
       this.settings.videoNoteOrder = DEFAULT_SETTINGS.videoNoteOrder;
     }
+    // Same for the tag: a saved list that is exactly the old default moves to
+    // yt-video, matching yt-channel and yt-playlist. A list with anything
+    // else in it was typed and stays.
+    if (Array.isArray(saved.tags) && saved.tags.length === 1 && saved.tags[0] === 'youtube-video') {
+      this.settings.tags = DEFAULT_SETTINGS.tags.slice();
+    }
     if (!Array.isArray(this.settings.channelTags)) this.settings.channelTags = DEFAULT_SETTINGS.channelTags.slice();
     // Older vaults stored a bare subfolder name, which is what 'subfolder' means.
     // Only when there is a saved config predating the setting: on a fresh install
@@ -1991,6 +2005,18 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName('Default properties for channel notes')
+      .setDesc('Same rules as the video note defaults, e.g. c-rank: 5.')
+      .addTextArea((t) => {
+        t.setPlaceholder('c-rank: 5').setValue(s.channelNoteDefaults || '').onChange(async (v) => {
+          s.channelNoteDefaults = v;
+          await this.save();
+        });
+        t.inputEl.rows = 2;
+        t.inputEl.style.fontFamily = 'var(--font-monospace)';
+      });
+
+    new Setting(containerEl)
       .setName('Channel note property order')
       .setDesc('Comma-separated, same rules as the video note order.')
       .addText((t) =>
@@ -2011,6 +2037,18 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
           await this.save();
         })
       );
+
+    new Setting(containerEl)
+      .setName('Default properties for video notes')
+      .setDesc('One "key: value" per line. Written on every new note so the property is there to edit, and added to an existing note that lacks it on the next sync. A value already on a note is never changed. Position them with the order above.')
+      .addTextArea((t) => {
+        t.setPlaceholder('v-rank: 5\nstatus: Watch Later').setValue(s.videoNoteDefaults || '').onChange(async (v) => {
+          s.videoNoteDefaults = v;
+          await this.save();
+        });
+        t.inputEl.rows = 3;
+        t.inputEl.style.fontFamily = 'var(--font-monospace)';
+      });
 
     new Setting(containerEl)
       .setName('Playlist note property order')
