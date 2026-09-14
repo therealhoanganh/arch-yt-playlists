@@ -3,7 +3,26 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.4.9 — current
+## 1.5.0 — current
+
+- **Video quality defaults to 1080p or less.** Best available was the old
+  default and took a 4K course down at 4K. A vault that already saved a
+  choice keeps it; only fresh installs see the new default.
+- **A playlist note keeps its properties across a re-sync, and `dl-all`
+  resets only when a video is new.** The note was rebuilt from scratch on
+  every sync, so `dl-all` went back to false whether or not anything had
+  changed, and any property a person added to the note was lost. Now the
+  existing properties come across, the configured tags are added to the
+  tags a person gave it, and `dl-all` stays true unless this sync created a
+  video note.
+- **A single-note download waits its turn like a bulk one.** *Download media
+  for this note* went straight to the download queue: nothing said it was
+  waiting, and its mode prompt appeared whenever a running bulk let it in,
+  ahead of playlists queued earlier. It now goes through the same run queue
+  as everything else — mode asked at once, a "Queued" toast, started after
+  what is ahead of it.
+
+## 1.4.9
 
 - **Each source row in settings has its own sync button**, so a playlist
   added later can be synced alone instead of re-running every source. The

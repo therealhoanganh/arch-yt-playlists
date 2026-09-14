@@ -76,7 +76,7 @@ const DEFAULT_SETTINGS = {
   mediaLocationMode: 'specified', // vault | same | subfolder | specified
   mediaSubfolder: 'Materials',
   mediaFolder: 'YouTube/Medias',
-  maxHeight: 0, // 0 = best available; else 2160 | 1440 | 1080 | 720
+  maxHeight: 1080, // 0 = best available; else 2160 | 1440 | 1080 | 720
   audioFormat: 'mp3',
   askDownloadMode: true,
   downloadSubtitles: true,
@@ -179,7 +179,7 @@ module.exports = class YouTubeArchiver extends Plugin {
           item
             .setTitle('Download media for this note')
             .setIcon('download')
-            .onClick(() => this.downloadMediaFor(file))
+            .onClick(() => this.bulkDownload([file]))
         );
       })
     );
@@ -254,7 +254,7 @@ module.exports = class YouTubeArchiver extends Plugin {
       checkCallback: (checking) => {
         const f = this.app.workspace.getActiveFile();
         if (!f || f.extension !== 'md') return false;
-        if (!checking) this.downloadMediaFor(f);
+        if (!checking) this.bulkDownload([f]);
         return true;
       },
     });
@@ -950,16 +950,20 @@ module.exports = class YouTubeArchiver extends Plugin {
     }
   }
 
-  // A bulk run started while another is going waits its turn rather than
-  // being refused: the mode is asked now, the downloads happen after the
-  // running run's last one. Each run keeps its own notice and summary, so
-  // six playlists queued in a row report six times.
+  // Every entry point -- one note, a multi-select, a whole playlist -- is a
+  // run through here, so a request made while another run is going waits its
+  // turn rather than being refused or slipping in ahead: the mode is asked
+  // now, the downloads happen after the queue ahead of it. Each run keeps
+  // its own notice and summary, so six playlists queued in a row report six
+  // times. A single note used to go straight to the download queue, which
+  // gave no sign it was waiting and popped its mode prompt minutes later.
   async bulkDownload(files, mode) {
-    if (!mode) mode = await this.askMode(`${files.length} notes`);
+    const what = files.length === 1 ? `"${files[0].basename}"` : `${files.length} notes`;
+    if (!mode) mode = await this.askMode(what);
     if (!mode || mode === 'skip') return;
     if (this.bulkRunning) {
-      this.log(`queued ${files.length} note(s) behind the running bulk download`);
-      this.toast(`Queued ${files.length} notes; they start when the current bulk download finishes.`);
+      this.log(`queued ${what} behind the running download`);
+      this.toast(`Queued ${what}; starts when the current download finishes.`);
     }
     const run = () => this.runBulk(files, mode);
     this._bulkChain = (this._bulkChain || Promise.resolve()).then(run, run);
