@@ -3,7 +3,18 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.4.6 — current
+## 1.4.7 — current
+
+- **The playlist name is sanitised once, where it is decided, so the folder,
+  the note file and the `yt-playlist` link on every video note agree.** Only
+  the file paths were sanitised before, so a title with a character a file
+  name cannot carry — *The Story of "Civilization"* — got a note without the
+  quotes and links with them, and *Download media for every video in this
+  playlist* reported no video notes linking to it. A re-sync repairs such a
+  link on existing notes: an entry that sanitises to the current name is
+  replaced by the current link, and duplicates collapse.
+
+## 1.4.6
 
 - **`obsidian://arch-yt-download?vault=…&file=…&mode=…` runs the
   per-playlist download from outside Obsidian.** `file` is the playlist note's
