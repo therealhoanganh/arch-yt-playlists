@@ -3,7 +3,17 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.4.5 — current
+## 1.4.6 — current
+
+- **`obsidian://arch-yt-download?vault=…&file=…&mode=…` runs the
+  per-playlist download from outside Obsidian.** `file` is the playlist note's
+  vault path, `.md` optional; `mode` is `video_and_audio`, `video_only` or
+  `audio_only` and replaces the prompt when given, otherwise the prompt shows
+  as usual. It exists so several playlists can be queued from a Terminal
+  `open` call, or a script, without opening each note. Anything else the URL
+  could name is refused with a toast rather than guessed at.
+
+## 1.4.5
 
 - **A bulk download started while another is running is queued, not
   refused.** Every download already went through one queue, so the guard

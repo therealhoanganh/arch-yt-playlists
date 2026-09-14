@@ -202,6 +202,28 @@ module.exports = class YouTubeArchiver extends Plugin {
       name: 'Sync all playlists',
       callback: () => this.syncAll(),
     });
+    // obsidian://arch-yt-download?vault=<name>&file=<playlist note path>&mode=<mode>
+    // The same as the per-playlist command, reachable from a shell or a script
+    // so several playlists can be queued without clicking through each. The
+    // path is vault-relative, with or without .md; mode is optional and, when
+    // given, replaces the prompt. Handy for `open` from Terminal.
+    this.registerObsidianProtocolHandler('arch-yt-download', (params) => {
+      const MODES = ['video_and_audio', 'video_only', 'audio_only'];
+      const raw = String(params.file || '').replace(/\.md$/, '');
+      const file = this.app.vault.getAbstractFileByPath(normalizePath(raw + '.md'));
+      if (!(file instanceof TFile)) {
+        this.toast(`arch-yt-download: no note at "${raw}"`);
+        return;
+      }
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter ?? null;
+      if (!fm || fm['dl-all'] === undefined) {
+        this.toast(`arch-yt-download: "${file.basename}" is not a playlist note`);
+        return;
+      }
+      const mode = MODES.includes(params.mode) ? params.mode : undefined;
+      this.log(`arch-yt-download: ${file.path}${mode ? ' as ' + mode : ''}`);
+      this.downloadWholePlaylist(file, mode);
+    });
     this.addCommand({
       id: 'download-playlist-media',
       name: 'Download media for every video in this playlist',
@@ -813,14 +835,14 @@ module.exports = class YouTubeArchiver extends Plugin {
     return out;
   }
 
-  async downloadWholePlaylist(playlistFile) {
+  async downloadWholePlaylist(playlistFile, mode) {
     const videos = this.videosInPlaylist(playlistFile);
     if (!videos.length) {
       this.toast(`No video notes link to "${playlistFile.basename}".`);
       return;
     }
     this.log(`playlist ${playlistFile.basename}: ${videos.length} video note(s)`);
-    const summary = await this.bulkDownload(videos);
+    const summary = await this.bulkDownload(videos, mode);
 
     // dl-all is only true when every video actually has its media on disk, which
     // is checked rather than inferred from the run that just happened.
@@ -926,8 +948,8 @@ module.exports = class YouTubeArchiver extends Plugin {
   // being refused: the mode is asked now, the downloads happen after the
   // running run's last one. Each run keeps its own notice and summary, so
   // six playlists queued in a row report six times.
-  async bulkDownload(files) {
-    const mode = await this.askMode(`${files.length} notes`);
+  async bulkDownload(files, mode) {
+    if (!mode) mode = await this.askMode(`${files.length} notes`);
     if (!mode || mode === 'skip') return;
     if (this.bulkRunning) {
       this.log(`queued ${files.length} note(s) behind the running bulk download`);
