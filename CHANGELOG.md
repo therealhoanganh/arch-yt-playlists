@@ -3,7 +3,18 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.4.4 — current
+## 1.4.5 — current
+
+- **A bulk download started while another is running is queued, not
+  refused.** Every download already went through one queue, so the guard
+  only ever spared two progress notices from interleaving — at the price of
+  having to come back after each playlist finished to start the next. Now the
+  mode is asked at once, a toast says the run is queued, and it starts when
+  the running one ends; each run keeps its own notice and summary, and a
+  playlist's `dl-all` is judged after its own run completes. Fire the command
+  on every course note in a row and walk away.
+
+## 1.4.4
 
 - **The default rank property is `rank: 0`, not `v-rank: 5`.** `rank` is a
   0–5 scale where 0 means never judged and 5 means very high; the old default

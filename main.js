@@ -922,14 +922,24 @@ module.exports = class YouTubeArchiver extends Plugin {
     }
   }
 
+  // A bulk run started while another is going waits its turn rather than
+  // being refused: the mode is asked now, the downloads happen after the
+  // running run's last one. Each run keeps its own notice and summary, so
+  // six playlists queued in a row report six times.
   async bulkDownload(files) {
-    if (this.bulkRunning) {
-      this.toast('A bulk download is already running.');
-      return;
-    }
     const mode = await this.askMode(`${files.length} notes`);
     if (!mode || mode === 'skip') return;
+    if (this.bulkRunning) {
+      this.log(`queued ${files.length} note(s) behind the running bulk download`);
+      this.toast(`Queued ${files.length} notes; they start when the current bulk download finishes.`);
+    }
+    const run = () => this.runBulk(files, mode);
+    this._bulkChain = (this._bulkChain || Promise.resolve()).then(run, run);
+    return this._bulkChain;
+  }
 
+  async runBulk(files, mode) {
+    if (this.aborted) return { ok: 0, skipped: 0, failed: 0 };
     this.bulkRunning = true;
     const notice = new Notice(`Downloading media: 0 / ${files.length}`, 0);
     let done = 0, ok = 0, skipped = 0, failed = 0;

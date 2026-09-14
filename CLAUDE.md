@@ -50,7 +50,9 @@ video. Do not "simplify" these to trust the property.
 command, right-click, or bulk run. Without it the keyboard shortcut fired during a
 bulk run starts a second yt-dlp beside it, splitting bandwidth and, on the same
 note, writing the same output path twice. The queue uses `.then(task, task)` so a
-failed download does not stall everything behind it.
+failed download does not stall everything behind it. Whole bulk runs chain the
+same way (`_bulkChain`), so a second playlist asked for during a run waits
+its turn instead of being refused.
 
 **An empty `--print-to-file` result does not mean the download failed.** yt-dlp
 skips a file that is already present and never fires `after_move`. Treating that
