@@ -391,6 +391,12 @@ module.exports = class YouTubeArchiver extends Plugin {
       new Notice('Add at least one playlist in ARCH YT Playlists settings.', 10000);
       return;
     }
+    return this.syncSources(sources);
+  }
+
+  // One source or all of them go through the same loop, so the per-row button
+  // in settings and the ribbon behave identically apart from the list.
+  async syncSources(sources) {
     if (this.syncing) {
       new Notice('A sync is already running.');
       return;
@@ -1899,6 +1905,12 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
           })
         );
         row.addExtraButton((b) =>
+          b.setIcon('refresh-cw').setTooltip('Sync this source only').onClick(() => {
+            if (!src.target) return this.plugin.toast('Fill in the target first.');
+            this.plugin.syncSources([src]);
+          })
+        );
+        row.addExtraButton((b) =>
           b.setIcon('trash').setTooltip('Remove').onClick(async () => {
             s.sources.splice(i, 1);
             await this.save();
@@ -1914,7 +1926,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
             renderSources();
           })
         )
-        .addButton((b) => b.setButtonText('Sync now').setCta().onClick(() => this.plugin.syncAll()));
+        .addButton((b) => b.setButtonText('Sync all').setCta().onClick(() => this.plugin.syncAll()));
     };
     renderSources();
 

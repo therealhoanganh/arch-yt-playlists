@@ -3,7 +3,16 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.4.8 — current
+## 1.4.9 — current
+
+- **Each source row in settings has its own sync button**, so a playlist
+  added later can be synced alone instead of re-running every source. The
+  button at the bottom is now called *Sync all*; both go through one
+  `syncSources(list)`, so they behave the same apart from the list. (A full
+  re-sync never duplicates notes — existing videos are matched by id and
+  merged — but it does re-enumerate every playlist, which is the slow part.)
+
+## 1.4.8
 
 - **The "media already on disk" check now finds the file.** The `media`
   property is a wikilink by file name, but the check looked the name up as a
