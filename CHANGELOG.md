@@ -3,7 +3,19 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.4.7 — current
+## 1.4.8 — current
+
+- **The "media already on disk" check now finds the file.** The `media`
+  property is a wikilink by file name, but the check looked the name up as a
+  vault path, which only a file at the vault root would satisfy — so it has
+  never matched since the first release. Every re-run handed the note to
+  yt-dlp again (which skipped the existing file itself, so the cost was a
+  process per note rather than a download), and `dl-all` on a playlist note
+  could never turn true. The link is now resolved from the note the way
+  Obsidian resolves it, so it also survives the media being moved to another
+  folder, as long as the file name stays unique.
+
+## 1.4.7
 
 - **The playlist name is sanitised once, where it is decided, so the folder,
   the note file and the `yt-playlist` link on every video note agree.** Only

@@ -848,7 +848,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     // is checked rather than inferred from the run that just happened.
     const missing = videos.filter((f) => {
       const fm = this.app.metadataCache.getFileCache(f)?.frontmatter ?? {};
-      return this.mediaOnDisk(fm).length === 0;
+      return this.mediaOnDisk(fm, f.path).length === 0;
     });
     await this.setFrontmatterFields(playlistFile, { 'dl-all': missing.length === 0 });
     if (missing.length) {
@@ -994,14 +994,20 @@ module.exports = class YouTubeArchiver extends Plugin {
 
   // dl-ed is only a claim. This checks the disk, so a box ticked by hand or left
   // stale by a deleted file does not decide whether a download happens.
-  mediaOnDisk(fm) {
+  // The media property is a wikilink by file name, not a path, so it is
+  // resolved the way Obsidian resolves a link from that note. The earlier
+  // lookup by path only matched a file at the vault root, so this check
+  // never found anything and dl-all never turned true.
+  mediaOnDisk(fm, notePath = '') {
     const raw = (fm && fm.media) || '';
     const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
     const found = [];
     for (const entry of list) {
       const m = String(entry).match(/\[\[([^\]|]+)/);
-      const target = m ? m[1] : String(entry);
-      const tf = this.app.vault.getAbstractFileByPath(target);
+      const target = (m ? m[1] : String(entry)).trim();
+      const tf =
+        this.app.metadataCache.getFirstLinkpathDest(target, notePath) ||
+        this.app.vault.getAbstractFileByPath(target);
       if (tf) found.push(tf);
     }
     return found;
@@ -1049,7 +1055,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     }
 
     // Checked before anything is asked or fetched, so a re-run is cheap.
-    const already = this.mediaOnDisk(fm);
+    const already = this.mediaOnDisk(fm, file.path);
     if (already.length) {
       this.log('media already on disk, only correcting dl-ed:', file.path);
       await this.setDlEd(file, true);

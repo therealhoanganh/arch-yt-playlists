@@ -1,7 +1,7 @@
 {
   "id": "arch-yt-playlists",
   "name": "𝗔𝗿𝗰𝗵 YT Playlist",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "minAppVersion": "1.6.0",
   "description": "Archives whole YouTube playlists into the vault as notes: metadata, trimmed description, chapters and transcript, with optional video and audio download.",
   "author": "Hoang Anh",

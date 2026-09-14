@@ -41,7 +41,10 @@ the fix ended up in `hydrate()`, which nothing called, while the live
 command. This file claimed otherwise for four versions. Restored in 1.3.0.
 
 **`dl-ed` and `dl-all` are claims, not evidence.** Whether a download happens is
-decided by looking for the file **on disk**. A box ticked by hand, or one left
+decided by looking for the file **on disk** — by resolving the `media` wikilink
+from the note, since it is a file name and not a path (looking it up as a path
+matched nothing for five releases, and nobody noticed because yt-dlp skips an
+existing file on its own). A box ticked by hand, or one left
 true after the file was deleted, does not stop it; a file that is already there
 only corrects the property. `dl-all` flips to true only after re-checking every
 video. Do not "simplify" these to trust the property.
