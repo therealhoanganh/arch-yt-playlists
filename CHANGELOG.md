@@ -3,7 +3,21 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.5.0 — current
+## 1.5.1 — current
+
+- **A fourth download choice: Subtitles.** Fetches only the subtitle files,
+  into the folder the video would go in and under its stem, so a later video
+  download finds them there and yt-dlp does not fetch them again. Nothing is
+  written to the note — a subtitle is a sidecar and is never linked as the
+  media — and the "already downloaded" check for this choice looks for a
+  subtitle file, not the media. The extras are pruned to one track as usual.
+- **A sync recomputes `dl-all` from disk.** 1.5.0 carried the value across a
+  re-sync, which preserved a tick made by hand; the property is meant to be
+  evidence, so it is now true only when every video note in the playlist has
+  its media on disk at the time of the sync, and false whenever the sync
+  created a video note.
+
+## 1.5.0
 
 - **Video quality defaults to 1080p or less.** Best available was the old
   default and took a 4K course down at 4K. A vault that already saved a

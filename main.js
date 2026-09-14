@@ -208,7 +208,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     // path is vault-relative, with or without .md; mode is optional and, when
     // given, replaces the prompt. Handy for `open` from Terminal.
     this.registerObsidianProtocolHandler('arch-yt-download', (params) => {
-      const MODES = ['video_and_audio', 'video_only', 'audio_only'];
+      const MODES = ['video_and_audio', 'video_only', 'audio_only', 'subs_only'];
       const raw = String(params.file || '').replace(/\.md$/, '');
       const file = this.app.vault.getAbstractFileByPath(normalizePath(raw + '.md'));
       if (!(file instanceof TFile)) {
@@ -1065,7 +1065,9 @@ module.exports = class YouTubeArchiver extends Plugin {
     }
 
     // Checked before anything is asked or fetched, so a re-run is cheap.
-    const already = this.mediaOnDisk(fm, file.path);
+    // A subtitles-only run has its own check further down: the media being
+    // there says nothing about whether its subtitles were fetched.
+    const already = mode === 'subs_only' ? [] : this.mediaOnDisk(fm, file.path);
     if (already.length) {
       this.log('media already on disk, only correcting dl-ed:', file.path);
       await this.setDlEd(file, true);
@@ -1121,6 +1123,41 @@ module.exports = class YouTubeArchiver extends Plugin {
           if (mp3) saved.push(mp3);
           else this.log('audio extraction failed; the video is still saved');
         }
+      } else if (mode === 'subs_only') {
+        // Subtitles only, no media: the files land where the video would,
+        // under its stem, so a later video download finds them and yt-dlp
+        // skips fetching them again. Nothing is written to the note -- a
+        // subtitle is a sidecar and is never linked as the media.
+        const have = this.subtitlesNamed(folder, rawStem);
+        if (have.length) {
+          this.log('subtitles already on disk:', have.join(', '));
+          return { ok: true, reason: 'already downloaded' };
+        }
+        const out = path.join(folder, `${stem}.%(ext)s`);
+        const r = await this.runYtDlp(
+          [
+            '--no-playlist', '--remote-components', 'ejs:github', '--skip-download',
+            '--write-auto-subs', '--write-subs',
+            '--sub-langs', this.settings.subtitleLangs || 'en.*',
+            '--sub-format', 'vtt/best',
+            '-o', out, url,
+          ],
+          600000
+        ).catch((e) => ({ code: 1, stderr: String((e && e.message) || e) }));
+        let files = this.subtitlesNamed(folder, rawStem);
+        if (r.code !== 0 || !files.length) {
+          notice.hide();
+          this.toast(`Subtitle download failed for "${file.basename}". See the console.`);
+          console.error('[ArchYTPlaylists] subtitle download failed:\n' + (r.stderr || 'no subtitle file appeared'));
+          return { ok: false, reason: 'subtitles failed' };
+        }
+        if (this.settings.keepOneSubtitle) {
+          const kept = this.pruneSubtitles(folder, rawStem);
+          files = kept ? [kept] : files;
+        }
+        notice.hide();
+        this.log('subtitles saved:', files.join(', '));
+        return { ok: true, files };
       } else if (mode === 'audio_only') {
         // Staged in a temp folder: YouTube's best audio is itself a webm, so
         // writing it beside the video under the same stem lands on the video,
@@ -1203,6 +1240,19 @@ module.exports = class YouTubeArchiver extends Plugin {
   // Files the output template could have produced: the stem, optionally with
   // yt-dlp's numeric suffix. Subtitle sidecars are excluded -- they are not the
   // media file and would be linked as if they were.
+  // The subtitle sidecars for a stem, the ones filesNamed leaves out.
+  subtitlesNamed(folder, stem) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(folder);
+    } catch (_) {
+      return [];
+    }
+    const esc = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const shape = new RegExp(`^${esc}\\.[A-Za-z0-9_-]+\\.(vtt|srt|ass)$`, 'i');
+    return entries.filter((n) => shape.test(n)).map((n) => path.join(folder, n));
+  }
+
   filesNamed(folder, stem) {
     let entries = [];
     try {
@@ -1834,6 +1884,7 @@ class DownloadModeModal extends Modal {
       ['video_and_audio', 'Video + Audio'],
       ['video_only', 'Video'],
       ['audio_only', 'Audio'],
+      ['subs_only', 'Subtitles'],
       ['skip', 'Skip'],
     ]) {
       const b = row.createEl('button', { text: label });
@@ -2253,6 +2304,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
             .addOption('video_and_audio', 'Video + Audio')
             .addOption('video_only', 'Video')
             .addOption('audio_only', 'Audio')
+            .addOption('subs_only', 'Subtitles')
             .setValue(s.defaultDownloadMode || 'video_and_audio')
             .onChange(async (v) => {
               s.defaultDownloadMode = v;
