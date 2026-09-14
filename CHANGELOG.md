@@ -3,7 +3,20 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.4.2 — current
+## 1.4.3 — current
+
+- **Video quality is a dropdown: Best available, 4K, 1440p, 1080p or 720p
+  or less.** It was a raw yt-dlp selector in a text box, whose default
+  `bestvideo*+bestaudio/best` takes the largest stream there is — a 4K course
+  came down at 4K. The choice is stored as `maxHeight` and turned into the
+  selector at download time, with the cap on both halves so a video that only
+  offers a single combined stream is capped too. A saved selector carrying
+  `[height<=N]` for one of those sizes becomes that choice on load; anything
+  else becomes Best available, which is what the old default did. Audio is
+  untouched: it was never read from that setting, and YouTube serves one or
+  two audio streams per video, so there is nothing to choose.
+
+## 1.4.2
 
 - **Default properties for video and channel notes.** New settings taking
   one `key: value` per line — video notes default to `v-rank: 5` and

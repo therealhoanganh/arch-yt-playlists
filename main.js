@@ -6,6 +6,17 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Video sizes offered by the quality dropdown; 0 means no cap.
+const HEIGHT_OPTIONS = [0, 2160, 1440, 1080, 720];
+
+// The yt-dlp selector for a height cap. Both halves carry the cap so a video
+// that only offers a single combined stream is capped too.
+function videoFormat(maxHeight) {
+  const h = Number(maxHeight) || 0;
+  const cap = h ? `[height<=${h}]` : '';
+  return `bestvideo*${cap}+bestaudio/best${cap}`;
+}
+
 const DEFAULT_SETTINGS = {
   // where notes land
   archiveRoot: 'YouTube/Playlists',
@@ -65,7 +76,7 @@ const DEFAULT_SETTINGS = {
   mediaLocationMode: 'specified', // vault | same | subfolder | specified
   mediaSubfolder: 'Materials',
   mediaFolder: 'YouTube/Medias',
-  quality: 'bestvideo*+bestaudio/best',
+  maxHeight: 0, // 0 = best available; else 2160 | 1440 | 1080 | 720
   audioFormat: 'mp3',
   askDownloadMode: true,
   downloadSubtitles: true,
@@ -1037,7 +1048,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     try {
       if (mode === 'video_only' || mode === 'video_and_audio') {
         const out = path.join(folder, `${stem}.%(ext)s`);
-        const vArgs = ['-f', this.settings.quality, '-o', out];
+        const vArgs = ['-f', videoFormat(this.settings.maxHeight), '-o', out];
         if (this.settings.downloadSubtitles) {
           vArgs.push(
             '--write-auto-subs', '--write-subs',
@@ -1620,6 +1631,16 @@ module.exports = class YouTubeArchiver extends Plugin {
       this.settings.tags = DEFAULT_SETTINGS.tags.slice();
     }
     if (!Array.isArray(this.settings.channelTags)) this.settings.channelTags = DEFAULT_SETTINGS.channelTags.slice();
+    // The video quality used to be a raw yt-dlp selector. A cap typed into it
+    // as [height<=N] becomes the matching dropdown choice; anything else was
+    // "best", which is what the old default meant.
+    if (typeof saved.quality === 'string') {
+      const m = saved.quality.match(/height<=(\d+)/);
+      this.settings.maxHeight = m && HEIGHT_OPTIONS.includes(Number(m[1])) ? Number(m[1]) : 0;
+      delete this.settings.quality;
+    }
+    if (!HEIGHT_OPTIONS.includes(Number(this.settings.maxHeight))) this.settings.maxHeight = 0;
+    this.settings.maxHeight = Number(this.settings.maxHeight);
     // Older vaults stored a bare subfolder name, which is what 'subfolder' means.
     // Only when there is a saved config predating the setting: on a fresh install
     // saved is empty, there is nothing to migrate, and running this would stomp
@@ -2103,13 +2124,18 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Video quality')
-      .setDesc('A yt-dlp format selector. The default merges best video with best audio.')
-      .addText((t) =>
-        t.setValue(s.quality).onChange(async (v) => {
-          s.quality = v.trim() || DEFAULT_SETTINGS.quality;
+      .setDesc('The best stream at or under this size is merged with the best audio. A video that only exists at a lower size is downloaded as is.')
+      .addDropdown((d) => {
+        d.addOption('0', 'Best available');
+        d.addOption('2160', '4K or less');
+        d.addOption('1440', '1440p or less');
+        d.addOption('1080', '1080p or less');
+        d.addOption('720', '720p or less');
+        d.setValue(String(s.maxHeight || 0)).onChange(async (v) => {
+          s.maxHeight = Number(v);
           await this.save();
-        })
-      );
+        });
+      });
 
     new Setting(containerEl)
       .setName('Audio format')

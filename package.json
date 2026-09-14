@@ -1,6 +1,6 @@
 {
   "name": "arch-yt-playlists",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Obsidian plugin that archives whole YouTube playlists into the vault as notes.",
   "private": true,
   "scripts": {
