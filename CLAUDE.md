@@ -110,8 +110,13 @@ download — from landing at the bottom.
 
 `videoNoteDefaults` and `channelNoteDefaults` are `key: value` lines written on
 creation and added to an existing note that lacks them on re-sync — never
-overwritten, because `v-rank: 5` on a note is a person's judgement the moment
-they change it. The default order names `v-rank` and `status` for this reason.
+overwritten, because `rank: 0` on a note is a person's judgement the moment
+they change it. The default order names `rank` and `status` for this reason.
+
+**`rank` is a 0–5 scale: 0 means never judged, 5 means very high.** It was
+`v-rank: 5` before 1.4.4, where 5 was the unjudged default, so the two scales do
+not line up and a re-sync turns every `v-rank` into `rank: 0`, whatever it held,
+logging the old value. Do not carry the old number across.
 
 Four property names are load-bearing and are **not** configurable: `url` (every
 lookup), `yt-playlist` (playlist resolution and cross-plugin ownership), `media`

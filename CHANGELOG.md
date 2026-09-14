@@ -3,7 +3,19 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.4.3 — current
+## 1.4.4 — current
+
+- **The default rank property is `rank: 0`, not `v-rank: 5`.** `rank` is a
+  0–5 scale where 0 means never judged and 5 means very high; the old default
+  of 5 stood for "not judged yet", so the two do not line up. A re-sync turns
+  every `v-rank` on an existing note into `rank: 0` whatever it held, logging
+  the old value, rather than carrying a number from one scale into the other.
+  A saved defaults setting that is exactly the old text moves to the new one
+  on load, and the saved order does the same, so `rank` keeps `v-rank`'s
+  position; anything typed stays. The channel defaults placeholder now
+  suggests `rank: 0` too.
+
+## 1.4.3
 
 - **Video quality is a dropdown: Best available, 4K, 1440p, 1080p or 720p
   or less.** It was a raw yt-dlp selector in a text box, whose default

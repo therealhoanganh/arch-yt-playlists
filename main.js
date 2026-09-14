@@ -27,14 +27,14 @@ const DEFAULT_SETTINGS = {
   // a name listed but not produced is skipped, so editing this can reorder or
   // drop a property but cannot invent one.
   // media first, so the player is the first thing in the properties panel;
-  // v-rank and status are hand-added on the notes this was modelled on, and
+  // rank and status are hand-added on the notes this was modelled on, and
   // naming them here positions them when present and costs nothing when not.
-  videoNoteOrder: 'media, channel, yt-playlist, banner, url, dl-ed, v-rank, duration, status, published, tags',
+  videoNoteOrder: 'media, channel, yt-playlist, banner, url, dl-ed, rank, duration, status, published, tags',
   playlistNoteOrder: 'dl-all, count, url, tags',
   // "key: value" per line, written on every new note so the property exists
   // to be edited, and added to an existing note that lacks it on the next
   // sync. A value already on a note is never changed.
-  videoNoteDefaults: 'v-rank: 5\nstatus: Watch Later',
+  videoNoteDefaults: 'rank: 0\nstatus: Watch Later',
   channelNoteDefaults: '',
   sources: [{ target: 'Watch Later', note: 'Watch Later' }],
 
@@ -1621,8 +1621,16 @@ module.exports = class YouTubeArchiver extends Plugin {
     // The 1.3.x default put media last, which is where a property added after
     // sync lands anyway. A vault still on that exact string never chose it, so
     // it moves to the new default; anything else was typed and stays.
-    if (saved.videoNoteOrder === 'dl-ed, duration, url, banner, yt-playlist, channel, media, published, tags') {
+    if (
+      saved.videoNoteOrder === 'dl-ed, duration, url, banner, yt-playlist, channel, media, published, tags' ||
+      saved.videoNoteOrder === 'media, channel, yt-playlist, banner, url, dl-ed, v-rank, duration, status, published, tags'
+    ) {
       this.settings.videoNoteOrder = DEFAULT_SETTINGS.videoNoteOrder;
+    }
+    // v-rank: 5 was the first guess at a default; rank: 0 replaced it. Only
+    // the exact old text moves, since anything else was typed.
+    if (saved.videoNoteDefaults === 'v-rank: 5\nstatus: Watch Later') {
+      this.settings.videoNoteDefaults = DEFAULT_SETTINGS.videoNoteDefaults;
     }
     // Same for the tag: a saved list that is exactly the old default moves to
     // yt-video, matching yt-channel and yt-playlist. A list with anything
@@ -2029,7 +2037,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       .setName('Default properties for channel notes')
       .setDesc('Same rules as the video note defaults, e.g. c-rank: 5.')
       .addTextArea((t) => {
-        t.setPlaceholder('c-rank: 5').setValue(s.channelNoteDefaults || '').onChange(async (v) => {
+        t.setPlaceholder('rank: 0').setValue(s.channelNoteDefaults || '').onChange(async (v) => {
           s.channelNoteDefaults = v;
           await this.save();
         });
@@ -2063,7 +2071,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       .setName('Default properties for video notes')
       .setDesc('One "key: value" per line. Written on every new note so the property is there to edit, and added to an existing note that lacks it on the next sync. A value already on a note is never changed. Position them with the order above.')
       .addTextArea((t) => {
-        t.setPlaceholder('v-rank: 5\nstatus: Watch Later').setValue(s.videoNoteDefaults || '').onChange(async (v) => {
+        t.setPlaceholder('rank: 0\nstatus: Watch Later').setValue(s.videoNoteDefaults || '').onChange(async (v) => {
           s.videoNoteDefaults = v;
           await this.save();
         });
