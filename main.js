@@ -169,6 +169,12 @@ module.exports = class YouTubeArchiver extends Plugin {
           );
           menu.addItem((item) =>
             item
+              .setTitle('Download subtitles for every video in this playlist')
+              .setIcon('subtitles')
+              .onClick(() => this.downloadWholePlaylist(file, 'subs_only'))
+          );
+          menu.addItem((item) =>
+            item
               .setTitle('Fill publish dates for this playlist')
               .setIcon('calendar')
               .onClick(() => this.fillPlaylistDates(file))
@@ -233,6 +239,18 @@ module.exports = class YouTubeArchiver extends Plugin {
         const fm = this.app.metadataCache.getFileCache(f)?.frontmatter ?? null;
         if (!fm || fm['dl-all'] === undefined) return false; // not a playlist note
         if (!checking) this.downloadWholePlaylist(f);
+        return true;
+      },
+    });
+    this.addCommand({
+      id: 'download-playlist-subtitles',
+      name: 'Download subtitles for every video in this playlist',
+      checkCallback: (checking) => {
+        const f = this.app.workspace.getActiveFile();
+        if (!f || f.extension !== 'md') return false;
+        const fm = this.app.metadataCache.getFileCache(f)?.frontmatter ?? null;
+        if (!fm || fm['dl-all'] === undefined) return false; // not a playlist note
+        if (!checking) this.downloadWholePlaylist(f, 'subs_only');
         return true;
       },
     });

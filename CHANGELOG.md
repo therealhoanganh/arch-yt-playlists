@@ -3,7 +3,14 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.5.1 — current
+## 1.5.2 — current
+
+- **New command: Download subtitles for every video in this playlist**, also
+  on the playlist note's right-click menu. The same run as the media
+  command with the Subtitles choice made for it, so it queues like any other
+  run and skips videos whose subtitle file is already there.
+
+## 1.5.1
 
 - **A fourth download choice: Subtitles.** Fetches only the subtitle files,
   into the folder the video would go in and under its stem, so a later video
