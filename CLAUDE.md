@@ -224,6 +224,17 @@ every vault. What is relied on:
 - A bare `file:///` URL there opens in its own player window.
 - A markdown `[Video](file:///…)` link parses as neither, and opened in the web browser.
 
+**The drive helpers are copied word for word in both plugins; change both together.**
+`driveOf`, `driveMounted` and `checkMediaExtended`, and the way the outside folder is
+worked out (`externalVideoFolder`: `<setting>/<vault name>/<the vault-relative media
+folder>`), are the same in ARCH YT Playlists and ARCH After Clipping, because the two
+share no code by design. A fix made in one only is how the two would start disagreeing:
+one refusing an unplugged drive the other writes into, or one putting a video where the
+other doesn't look. The link form has two more copies in `~/Documents/backup-strategy/`:
+`file_url` in `move-videos-out.py` and `relink-videos.py` reproduces Node's
+`pathToFileURL` (checked against Node on all 296 moved videos). Change the link form in
+all four places, or not at all.
+
 `checkMediaExtended()` logs the running version on load when the setting is set. If
 Media Extended ever changes version, retest both points before trusting it. Only
 playback depends on it: the "already downloaded?" check reads the disk.
