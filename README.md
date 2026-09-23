@@ -55,7 +55,7 @@ tags:
 
 ## Downloading media
 
-**Download media for this note** from the command palette, or right-click a note. Select several notes and right-click for a bulk download.
+**Download media for this playlist note** (or **Download subtitles for this playlist note**) from the command palette while a playlist note is open, or right-click the playlist note. Select several video notes and right-click for a bulk download. A single video note is downloaded with ARCH After Clipping's **Download video / audio / subtitles for this note** commands, which hand the note back to this plugin with the choice made, so the file lands with the rest of its playlist.
 
 You are asked once what you want — Video + Audio, Video, Audio, or Skip — with a **use this for the rest of this session** checkbox, so a bulk run of fifty asks once.
 

@@ -3,7 +3,25 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.5.2 — current
+## 1.6.0 — current
+
+- **Playlist notes only.** The playlist commands are renamed *Download media for
+  this playlist note* and *Download subtitles for this playlist note* (palette
+  and right-click menu), and still show only while a playlist note is open. The
+  single-note *Download media for this note* is gone from the palette and the
+  right-click menu: a single video note is ARCH After Clipping's, whose four
+  *Download … for this note* commands (1.11.0) hand a note of this plugin back
+  here with the choice made, so the file still lands in this plugin's media
+  folder. The palette had shown two identical *Download media for this note*.
+  Selecting several video notes and right-clicking still offers the bulk
+  download. No vault had a hotkey on the removed command.
+  His words: *"Also change YT playlist 'Dowload media for this note' to 'Dowload media
+  for this playlist note', better clarity"*, and then *"only run when in playlist note,
+  the reason is we already have after clipping for individual video/note, we're just
+  doing bad job at making the two plugins in synergy with each other, please fix
+  that!"*
+
+## 1.5.2
 
 - **New command: Download subtitles for every video in this playlist**, also
   on the playlist note's right-click menu. The same run as the media

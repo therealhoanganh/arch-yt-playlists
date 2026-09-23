@@ -163,13 +163,13 @@ module.exports = class YouTubeArchiver extends Plugin {
         if (fm && fm['dl-all'] !== undefined) {
           menu.addItem((item) =>
             item
-              .setTitle('Download media for every video in this playlist')
+              .setTitle('Download media for this playlist note')
               .setIcon('download')
               .onClick(() => this.downloadWholePlaylist(file))
           );
           menu.addItem((item) =>
             item
-              .setTitle('Download subtitles for every video in this playlist')
+              .setTitle('Download subtitles for this playlist note')
               .setIcon('subtitles')
               .onClick(() => this.downloadWholePlaylist(file, 'subs_only'))
           );
@@ -181,12 +181,10 @@ module.exports = class YouTubeArchiver extends Plugin {
           );
           return;
         }
-        menu.addItem((item) =>
-          item
-            .setTitle('Download media for this note')
-            .setIcon('download')
-            .onClick(() => this.bulkDownload([file]))
-        );
+        // A single video note is ARCH After Clipping's to download, through its
+        // four Download ... for this note commands, which hand a note of this
+        // plugin back here with the choice made. Offering it here too put two
+        // "Download media for this note" in the palette.
       })
     );
 
@@ -232,7 +230,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     });
     this.addCommand({
       id: 'download-playlist-media',
-      name: 'Download media for every video in this playlist',
+      name: 'Download media for this playlist note',
       checkCallback: (checking) => {
         const f = this.app.workspace.getActiveFile();
         if (!f || f.extension !== 'md') return false;
@@ -244,7 +242,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     });
     this.addCommand({
       id: 'download-playlist-subtitles',
-      name: 'Download subtitles for every video in this playlist',
+      name: 'Download subtitles for this playlist note',
       checkCallback: (checking) => {
         const f = this.app.workspace.getActiveFile();
         if (!f || f.extension !== 'md') return false;
@@ -263,16 +261,6 @@ module.exports = class YouTubeArchiver extends Plugin {
         const fm = this.app.metadataCache.getFileCache(f)?.frontmatter ?? null;
         if (!fm || fm['dl-all'] === undefined) return false; // not a playlist note
         if (!checking) this.fillPlaylistDates(f);
-        return true;
-      },
-    });
-    this.addCommand({
-      id: 'download-media-note',
-      name: 'Download media for this note',
-      checkCallback: (checking) => {
-        const f = this.app.workspace.getActiveFile();
-        if (!f || f.extension !== 'md') return false;
-        if (!checking) this.bulkDownload([f]);
         return true;
       },
     });

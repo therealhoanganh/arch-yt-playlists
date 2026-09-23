@@ -181,9 +181,19 @@ Separate plugin, separate repo, no shared code. The split is by workflow —
 reactive versus on-demand — not by site. Almost nothing in After Clipping is
 YouTube-specific, and moving media handling there would break its main use case.
 
-The one link: this plugin writes `yt-playlist` on video notes and `dl-all` on
+The first link: this plugin writes `yt-playlist` on video notes and `dl-all` on
 playlist notes, and tags channel notes `yt-channel`; After Clipping skips any
-note carrying one of those. Before that
+note carrying one of those.
+
+**The second, since 1.6.0 here and After Clipping 1.11.0, is a runtime call into
+this plugin.** Single notes are After Clipping's job and playlist notes this one's,
+his division ("we already have after clipping for individual video/note"). So this
+plugin has no single-note download command, and After Clipping's *Download … for
+this note* commands call `bulkDownload([file], mode)` on a video note and
+`downloadWholePlaylist(file, mode)` on a playlist note. **Those two method names and
+the mode strings (`video_and_audio`, `video_only`, `audio_only`, `subs_only`) are a
+contract**: rename one and After Clipping quietly downloads a video note into its
+own folder instead. Before that
 existed, After Clipping renamed every note here on every sync — including renaming
 the playlist note itself. **If you rename those properties, After Clipping's
 `otherArchKeys` setting must change to match.**
