@@ -246,6 +246,29 @@ all four places, or not at all.
 Media Extended ever changes version, retest both points before trusting it. Only
 playback depends on it: the "already downloaded?" check reads the disk.
 
+## Planned: more sites than YouTube, and maybe a new name (not started)
+
+Hoang Anh, 2026-09-24, after asking how this plugin and After Clipping differ: *"there
+is a problem in future which is download videos with subtitle from Rumble, for MONEY
+vault, maybe like 40 videos from a channel which stores Andew Tate videos. So I think we
+will need to expand and maybe rename the YT Playlists plugin. And for other things too,
+Facebook, X/Twitter. We don't have to work on it now but it's a plan."*
+
+The gap: After Clipping works one note at a time, as each clip arrives, on any site, and
+has no bulk mode. This plugin does bulk, but YouTube only. So "every video of a Rumble
+channel, with subtitles" has no tool yet. Things known now, to check when the work starts:
+- yt-dlp has extractors for Rumble, Facebook and X, so downloading is likely not the
+  problem. The YouTube-only parts are here: flat-playlist enumeration, the note template
+  (`url` → video id, oEmbed, thumbnails from the id), and channel notes.
+- Whether Rumble offers subtitles for those videos at all is unknown. If not, the
+  transcription path on the PC is the fallback (Whisper runs there).
+- ARCH X Twitter already archives X profiles with gallery-dl. Decide whether X video
+  belongs there or here before building it twice.
+- MONEY's Andrew Tate videos are sensitive: they stay in the vault and are backed up to
+  both drives. So *Videos outside the vault* stays off in MONEY.
+- A rename touches the plugin id, the BRAT installs in every vault, and After Clipping's
+  runtime call into this plugin (`app.plugins.getPlugin('arch-yt-playlists')`).
+
 ## Releasing
 
 `npm run build` writes `dist/main.js` and `dist/manifest.json`. Those two files
