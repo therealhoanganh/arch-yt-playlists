@@ -3,7 +3,44 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.6.0 — current
+## 1.7.0 — current
+
+- **Videos outside the vault.** A new setting, *Videos outside the vault*: an
+  absolute folder on another drive, such as `/Volumes/4T-HDD/Media`. When it is
+  set, a downloaded video goes there, under the vault's name and the folders it
+  would have had in the vault, so `Psycho-history/YouTube/…/Materials/x.webm` becomes
+  `/Volumes/4T-HDD/Media/Psycho-history/YouTube/…/Materials/x.webm`. Subtitles and
+  audio stay in the vault. yt-dlp is given a separate `subtitle:` output template
+  for that, so the `.vtt` Claude reads stays beside the note. `media` is written as
+  a bare `file:///…` URL, the form Media Extended 4.2.1 reads and plays in its own
+  window. A markdown `[Video](file:///…)` link opened in the web browser instead.
+  Empty, the default, changes nothing.
+- **The "already downloaded?" check reads a `file:///` link.**
+  - The file is there: the video counts as downloaded.
+  - The drive is not plugged in: it also counts as downloaded, and the log says
+    so. "Drive unplugged" is not "file gone", and reading it as gone would download
+    the whole playlist again into the vault, the 93 GB trap.
+  - The drive is plugged in and the file is missing: it downloads again.
+- **Nothing downloads while the drive is unplugged.** A video download is refused
+  with a notice. It never falls back to the vault, and never creates the folder: on
+  an unplugged drive, `/Volumes/<name>` is a plain folder on the Mac's own disk.
+  A drive counts as plugged in when `/Volumes/<name>` has a different device
+  number from `/Volumes`.
+- **The Media Extended version goes in the log on load**, only when the setting is
+  set: `Media Extended 4.2.1, the version videos outside the vault were tested
+  with`, or `not the tested 4.2.1` for any other version. Hoang Anh keeps 4.2.1 on
+  purpose: *"I specifically use 4.2.1 because it's more stable, 4.2.5 were bugged
+  from my experience using it."*
+- Why: the non-sensitive videos (Psycho-history, TECHNOS, Obsidian, about 107 GB)
+  move to 4T-HDD to free the Mac's disk. On 2026-09-24 Hoang Anh chose a setting
+  in the two downloaders over a separate plugin. The reasons are in
+  `~/Documents/backup-strategy/CHANGELOG.md`, and the plan is in
+  `Videos Outside the Vault.md` beside it. Tested in `TESTFIELD` against 4T-HDD:
+  a download, a second run (skipped as already downloaded), a drive that isn't
+  plugged in (counted as present, and a new download refused with no folder
+  created), and a file missing from a plugged-in drive (counted as missing).
+
+## 1.6.0
 
 - **Playlist notes only.** The playlist commands are renamed *Download media for
   this playlist note* and *Download subtitles for this playlist note* (palette

@@ -198,6 +198,36 @@ existed, After Clipping renamed every note here on every sync — including rena
 the playlist note itself. **If you rename those properties, After Clipping's
 `otherArchKeys` setting must change to match.**
 
+## Videos outside the vault, and the coupling to Media Extended
+
+**Since 1.7.0, a video can live on another drive** (setting *Videos outside the
+vault*, e.g. `/Volumes/4T-HDD/Media`). The video goes under
+`<that folder>/<vault name>/<the folder it would have had in the vault>`, so the
+drive mirrors the vault. The one-off move script in `~/Documents/backup-strategy/`
+uses the same mapping, and the two must agree. Subtitles and audio stay in the vault
+(a `subtitle:` output template). `media` is a bare `file:///…` URL, from Node's
+`pathToFileURL`. The plan and the reasons are in
+`~/Documents/backup-strategy/Videos Outside the Vault.md`.
+
+**A `file:///` video on a drive that is not plugged in counts as downloaded** (`mediaOnDisk`).
+Do not "simplify" this to an existence check. Unplugged is not gone, and treating it
+as gone downloads a whole playlist again into the vault. A download to an unplugged
+drive is refused, and the folder is never created. A drive is plugged in when
+`/Volumes/<name>` has a different device number from `/Volumes`, because an empty
+folder of that name can sit on the Mac's own disk.
+
+**Playback depends on Media Extended, tested on 4.2.1 only.** Hoang Anh keeps 4.2.1 on
+purpose (*"4.2.5 were bugged from my experience using it"*), frozen through BRAT in
+every vault. What is relied on:
+- Its media-note schema reads `video`, `audio` or `media` from the frontmatter as a
+  string: a `[[wikilink]]` resolves to a vault file, anything else is parsed as a URL.
+- A bare `file:///` URL there opens in its own player window.
+- A markdown `[Video](file:///…)` link parses as neither, and opened in the web browser.
+
+`checkMediaExtended()` logs the running version on load when the setting is set. If
+Media Extended ever changes version, retest both points before trusting it. Only
+playback depends on it: the "already downloaded?" check reads the disk.
+
 ## Releasing
 
 `npm run build` writes `dist/main.js` and `dist/manifest.json`. Those two files

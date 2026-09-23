@@ -5,6 +5,31 @@ const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { pathToFileURL, fileURLToPath } = require('url');
+
+// The drive a folder outside the vault lives on. On macOS that is
+// /Volumes/<name>; elsewhere the path's root.
+function driveOf(p) {
+  const parts = String(p).split(path.sep);
+  if (process.platform === 'darwin' && parts[1] === 'Volumes' && parts[2]) {
+    return path.join('/', 'Volumes', parts[2]);
+  }
+  return path.parse(String(p)).root;
+}
+
+// Whether that drive is plugged in. /Volumes/<name> can exist as an ordinary
+// folder on the Mac's own disk (macOS leaves one behind, and mkdir -p would
+// create one), and writing into it fills the Mac instead of the drive. A
+// mounted drive has a different device number from /Volumes itself.
+function driveMounted(p) {
+  const d = driveOf(p);
+  try {
+    if (d.startsWith('/Volumes/')) return fs.statSync(d).dev !== fs.statSync('/Volumes').dev;
+    return fs.existsSync(d);
+  } catch (_) {
+    return false;
+  }
+}
 
 // Video sizes offered by the quality dropdown; 0 means no cap.
 const HEIGHT_OPTIONS = [0, 2160, 1440, 1080, 720];
@@ -76,6 +101,10 @@ const DEFAULT_SETTINGS = {
   mediaLocationMode: 'specified', // vault | same | subfolder | specified
   mediaSubfolder: 'Materials',
   mediaFolder: 'YouTube/Medias',
+  // An absolute folder on another drive. When set, the video file alone goes
+  // there, under the vault's name and the folders it would have had in the
+  // vault; subtitles and audio stay in the vault. Empty keeps it in the vault.
+  externalVideoFolder: '',
   maxHeight: 1080, // 0 = best available; else 2160 | 1440 | 1080 | 720
   audioFormat: 'mp3',
   askDownloadMode: true,
@@ -191,6 +220,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     this.addSettingTab(new YouTubeArchiverSettingTab(this.app, this));
 
     this.addRibbonIcon('download', 'Sync YouTube playlists', () => this.syncAll());
+    this.app.workspace.onLayoutReady(() => this.checkMediaExtended());
 
     if (!this.settings.setupDone) {
       this.app.workspace.onLayoutReady(async () => {
@@ -289,6 +319,23 @@ module.exports = class YouTubeArchiver extends Plugin {
   // Set by "use this for the rest of this session"; cleared on unload.
   get sessionMode() { return this._sessionMode || null; }
   set sessionMode(v) { this._sessionMode = v; }
+
+  // Videos outside the vault are played by Media Extended, which reads the
+  // file:/// URL in `media`. That was tested on 4.2.1 only, the version Hoang
+  // Anh keeps on purpose ("4.2.5 were bugged from my experience"), so the log
+  // says which version is running. Only playback depends on it: the
+  // "already downloaded?" check reads the disk, not Media Extended.
+  checkMediaExtended() {
+    if (!String(this.settings.externalVideoFolder || '').trim()) return;
+    const TESTED = '4.2.1';
+    const plugins = this.app.plugins || {};
+    const mx = plugins.manifests && plugins.manifests['media-extended'];
+    const on = !!(plugins.enabledPlugins && plugins.enabledPlugins.has('media-extended'));
+    if (!mx) this.log(`Media Extended is not installed: file:/// videos will open outside Obsidian (tested with ${TESTED})`);
+    else if (!on) this.log(`Media Extended ${mx.version} is installed but turned off: file:/// videos will open outside Obsidian`);
+    else if (mx.version === TESTED) this.log(`Media Extended ${mx.version}, the version videos outside the vault were tested with`);
+    else this.log(`Media Extended ${mx.version}, not the tested ${TESTED}: check that file:/// videos still play`);
+  }
 
   log(...args) {
     // Always on. The toggle only ever encoded indecision, and a log that is
@@ -819,6 +866,23 @@ module.exports = class YouTubeArchiver extends Plugin {
     return rel ? path.join(base, rel) : base;
   }
 
+  // Where the video file goes when Videos outside the vault is set: the folder
+  // resolveMediaFolder gives, moved under <externalVideoFolder>/<vault name>, so
+  // the drive mirrors the vault and a video's place there follows from its
+  // place here. Null when the setting is empty, or when the media folder is
+  // itself an absolute path outside the vault, which already is somewhere else.
+  externalVideoFolder(noteFolder) {
+    const root = String(this.settings.externalVideoFolder || '').trim();
+    if (!root || !path.isAbsolute(root)) return null;
+    const inVault = this.resolveMediaFolder(noteFolder);
+    const base =
+      this.app.vault.adapter && this.app.vault.adapter.getBasePath
+        ? this.app.vault.adapter.getBasePath()
+        : '';
+    if (!base || (inVault !== base && !inVault.startsWith(base + path.sep))) return null;
+    return path.join(root, this.app.vault.getName(), path.relative(base, inVault));
+  }
+
   /* ---------------- media download ---------------- */
 
   // Sequential on purpose: ten parallel yt-dlp processes saturate the connection
@@ -1014,11 +1078,27 @@ module.exports = class YouTubeArchiver extends Plugin {
   // resolved the way Obsidian resolves a link from that note. The earlier
   // lookup by path only matched a file at the vault root, so this check
   // never found anything and dl-all never turned true.
+  //
+  // A video outside the vault is a file:/// URL instead (1.7.0). It counts as
+  // present when the file is there, and also when its drive is not plugged
+  // in: "drive unplugged" is not "file gone", and reading it as gone would
+  // download the whole playlist again into the vault. Only a plugged-in drive
+  // without the file lets a download happen.
   mediaOnDisk(fm, notePath = '') {
     const raw = (fm && fm.media) || '';
     const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
     const found = [];
     for (const entry of list) {
+      if (/^file:\/\//i.test(String(entry).trim())) {
+        let p = '';
+        try { p = fileURLToPath(String(entry).trim()); } catch (_) { continue; }
+        if (fs.existsSync(p)) found.push({ path: p, outside: true });
+        else if (!driveMounted(p)) {
+          this.log('media is on a drive that is not plugged in, counted as present:', p);
+          found.push({ path: p, outside: true, unplugged: true });
+        }
+        continue;
+      }
       const m = String(entry).match(/\[\[([^\]|]+)/);
       const target = (m ? m[1] : String(entry)).trim();
       const tf =
@@ -1086,12 +1166,26 @@ module.exports = class YouTubeArchiver extends Plugin {
       return { ok: false, reason: 'skipped' };
     }
 
+    // folder is in the vault and takes everything but the video: subtitles
+    // and audio stay there. videoFolder is on the other drive when Videos
+    // outside the vault is set, and the same folder when it is not.
     const noteFolder = file.parent ? file.parent.path : '';
     const folder = this.resolveMediaFolder(noteFolder);
+    const external = this.externalVideoFolder(noteFolder);
+    const videoFolder = external || folder;
+    const wantsVideo = mode === 'video_only' || mode === 'video_and_audio';
+    if (external && wantsVideo && !driveMounted(external)) {
+      // Never falls back to the vault, and never creates the folder: on an
+      // unplugged drive that would be a folder on the Mac's own disk.
+      this.log('video not downloaded, the drive is not plugged in:', external);
+      this.toast(`${driveOf(external)} is not plugged in, so "${file.basename}" was not downloaded.`);
+      return { ok: false, reason: 'drive not plugged in' };
+    }
     try {
       fs.mkdirSync(folder, { recursive: true });
+      if (external && wantsVideo) fs.mkdirSync(external, { recursive: true });
     } catch (e) {
-      this.toast(`Could not create the media folder: ${folder}`);
+      this.toast(`Could not create the media folder: ${e.path || folder}`);
       return { ok: false, reason: 'folder' };
     }
 
@@ -1103,7 +1197,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     const saved = [];
     try {
       if (mode === 'video_only' || mode === 'video_and_audio') {
-        const out = path.join(folder, `${stem}.%(ext)s`);
+        const out = path.join(videoFolder, `${stem}.%(ext)s`);
         const vArgs = ['-f', videoFormat(this.settings.maxHeight), '-o', out];
         if (this.settings.downloadSubtitles) {
           vArgs.push(
@@ -1111,8 +1205,12 @@ module.exports = class YouTubeArchiver extends Plugin {
             '--sub-langs', this.settings.subtitleLangs || 'en.*',
             '--sub-format', 'vtt/best'
           );
+          // yt-dlp takes a separate output template per file type, so the
+          // subtitles land in the vault, beside the note, while the video goes
+          // to the drive. They are the part Claude reads.
+          if (external) vArgs.push('-o', `subtitle:${path.join(folder, `${stem}.%(ext)s`)}`);
         }
-        const r = await this.runMedia(vArgs, url, folder, rawStem);
+        const r = await this.runMedia(vArgs, url, videoFolder, rawStem);
         if (!r.ok) {
           notice.hide();
           this.toast(`Video download failed for "${file.basename}". See the console.`);
@@ -1204,9 +1302,12 @@ module.exports = class YouTubeArchiver extends Plugin {
       this.app.vault.adapter && this.app.vault.adapter.getBasePath
         ? this.app.vault.adapter.getBasePath()
         : '';
+    // Outside the vault: a bare file:/// URL, the form Media Extended reads
+    // from `media` and plays in its own window (tested on 4.2.1, 2026-09-24).
+    // A markdown [Video](file:///…) link opened in the web browser instead.
     const links = saved.map((abs) => {
-      const rel = base && abs.startsWith(base) ? abs.slice(base.length + 1) : abs;
-      return `[[${rel.split('/').pop()}]]`;
+      if (!base || !abs.startsWith(base + path.sep)) return pathToFileURL(abs).href;
+      return `[[${abs.slice(base.length + 1).split('/').pop()}]]`;
     });
     await this.setFrontmatterFields(file, { media: links.length === 1 ? links[0] : links, 'dl-ed': true });
     this.log('media saved:', saved.join(', '));
@@ -2240,6 +2341,24 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
           })
         );
     }
+
+    new Setting(containerEl)
+      .setName('Videos outside the vault')
+      .setDesc(
+        'An absolute folder on another drive, e.g. /Volumes/4T-HDD/Media. When set, a downloaded video goes there instead, ' +
+          'under this vault\'s name and the same folders it would have had in the vault; subtitles and audio stay in the vault. ' +
+          'The note\'s media property links it as file:///…, which Media Extended plays. Nothing is downloaded while that drive ' +
+          'is unplugged, and a video on an unplugged drive counts as downloaded. Leave empty to keep videos in the vault.'
+      )
+      .addText((t) =>
+        t
+          .setPlaceholder('/Volumes/4T-HDD/Media')
+          .setValue(s.externalVideoFolder || '')
+          .onChange(async (v) => {
+            s.externalVideoFolder = v.trim();
+            await this.save();
+          })
+      );
 
     new Setting(containerEl)
       .setName('Video quality')
