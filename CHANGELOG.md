@@ -3,7 +3,24 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.7.0 — current
+## 1.7.1 — current
+
+- **A readable link to a video outside the vault, at the top of the note body:**
+  `[4T-HDD: <file name>](file:///…)`. `media` has to stay a bare `file:///` URL,
+  because Media Extended 4.2.1 reads nothing else there, and a labelled link in a
+  property opens in the web browser (tested). So the properties panel shows a long
+  `%`-encoded address. His words: *"One prolem is link name of media file in property,
+  they are currenly full system root path with lot of % simple, can you change it so it
+  will be like "4TB-HDD: File name" instead?"* He chose this form over keeping the raw
+  address or drawing the property with Obsidian's undocumented internals. A link in
+  the body opens in Media Extended's window. `(` and `)` are encoded in it too, so a
+  folder like *Dante Seminar (June 2026, Beijing)* can't end the link early. It is
+  added once: only the body is checked, since `media` always holds the same address.
+  The 295 videos moved on 2026-09-24 got the same link from
+  `move-videos-out.py --body-links`, and `relink-videos.py` renames the label when it
+  follows a renamed video. Tested in `TESTFIELD`.
+
+## 1.7.0
 
 - **Videos outside the vault.** A new setting, *Videos outside the vault*: an
   absolute folder on another drive, such as `/Volumes/4T-HDD/Media`. When it is

@@ -320,6 +320,33 @@ module.exports = class YouTubeArchiver extends Plugin {
   get sessionMode() { return this._sessionMode || null; }
   set sessionMode(v) { this._sessionMode = v; }
 
+  // A video outside the vault gets a readable link at the top of the note
+  // body, "4T-HDD: <file name>". `media` has to stay a bare file:/// URL,
+  // because Media Extended reads nothing else there and a labelled link in a
+  // property opens in the web browser, so the properties panel shows a long
+  // %-encoded address. A link in the body opens in Media Extended's window.
+  // Hoang Anh asked for this on 2026-09-24. The body link encodes ( and ) as
+  // well, so a folder like "Dante Seminar (June 2026, Beijing)" cannot end the
+  // markdown link early. Added once; a note already linking the file is left alone.
+  async addDriveLinks(file, absPaths) {
+    const links = absPaths.map((abs) => {
+      const url = pathToFileURL(abs).href.replace(/\(/g, '%28').replace(/\)/g, '%29');
+      const label = `${path.basename(driveOf(abs))}: ${path.basename(abs)}`.replace(/([\[\]])/g, '\\$1');
+      return { url, line: `[${label}](${url})` };
+    });
+    if (!links.length) return;
+    await this.app.vault.process(file, (text) => {
+      // Only the body counts: `media` in the frontmatter always holds the address.
+      const m = text.match(/^---\n[\s\S]*?\n---\n/);
+      const head = m ? m[0] : '';
+      const rest = text.slice(head.length).replace(/^\n+/, '');
+      const todo = links.filter((l) => !rest.includes(l.url));
+      if (!todo.length) return text;
+      return head + '\n' + todo.map((l) => l.line).join('\n') + '\n\n' + rest;
+    });
+    this.log('readable drive link added to the note body:', file.path);
+  }
+
   // Videos outside the vault are played by Media Extended, which reads the
   // file:/// URL in `media`. That was tested on 4.2.1 only, the version Hoang
   // Anh keeps on purpose ("4.2.5 were bugged from my experience"), so the log
@@ -1310,6 +1337,7 @@ module.exports = class YouTubeArchiver extends Plugin {
       return `[[${abs.slice(base.length + 1).split('/').pop()}]]`;
     });
     await this.setFrontmatterFields(file, { media: links.length === 1 ? links[0] : links, 'dl-ed': true });
+    await this.addDriveLinks(file, saved.filter((abs) => !base || !abs.startsWith(base + path.sep)));
     this.log('media saved:', saved.join(', '));
     return { ok: true, files: saved };
   }

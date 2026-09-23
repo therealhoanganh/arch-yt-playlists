@@ -224,8 +224,15 @@ every vault. What is relied on:
 - A bare `file:///` URL there opens in its own player window.
 - A markdown `[Video](file:///…)` link parses as neither, and opened in the web browser.
 
+**A readable body link goes with it** (`addDriveLinks`, since YT Playlists 1.7.1 and
+After Clipping 1.13.1): `[4T-HDD: <file name>](file:///…)` at the top of the body,
+because `media` must stay a bare URL and reads as a long `%`-encoded address. Check
+only the body for an existing link: the frontmatter always holds the address, and
+checking the whole note made the first version add nothing, ever. Its `(` `)` are
+encoded, unlike `media`'s. `relink-videos.py` keeps the label in step with a rename.
+
 **The drive helpers are copied word for word in both plugins; change both together.**
-`driveOf`, `driveMounted` and `checkMediaExtended`, and the way the outside folder is
+`driveOf`, `driveMounted`, `checkMediaExtended` and `addDriveLinks`, and the way the outside folder is
 worked out (`externalVideoFolder`: `<setting>/<vault name>/<the vault-relative media
 folder>`), are the same in ARCH YT Playlists and ARCH After Clipping, because the two
 share no code by design. A fix made in one only is how the two would start disagreeing:
