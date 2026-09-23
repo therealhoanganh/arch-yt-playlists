@@ -8,7 +8,8 @@ things are the way they are, and it is kept current.
 
 ## The most important thing to know
 
-**This plugin is the least tested of the two.** It writes many notes at once, so a
+**This plugin is the least tested of the two downloaders** (this and ARCH After
+Clipping). It writes many notes at once, so a
 mistake is multiplied. Its note template was rewritten recently and much of the
 media download is new. Verify against a real sync on a small playlist, not against
 the mock.
@@ -204,6 +205,15 @@ when defined and falls back to reading from disk when it is not. That fallback i
 what keeps the repo runnable unbuilt: edit, reload in Obsidian, no build step. Do
 not "tidy" it into a single path — losing the fallback costs the edit-and-reload
 loop, losing the bundle brings back the load failure.
+
+**`purgeModuleCache` has both faults ARCH Recreations found and fixed in its copy**
+(read in the code on 2026-09-23): it compares cache keys against the symlinked
+plugin path, while Node caches a module under its real path, and it walks the
+`require.cache` of the `require` a plugin is handed, which is Obsidian's wrapper and
+not Node's. So an edit to `lib/` may not take effect on a plugin reload in
+`TESTFIELD`; releases are unaffected, since `lib/` is inlined there. The fix is
+Recreations' version (`fs.realpathSync`, `window.require.cache`); open work in
+`../CLAUDE.md`.
 
 Verify a release the way it actually installs: copy only `dist/main.js` and
 `dist/manifest.json` into a folder with no `lib/`, and load it.
