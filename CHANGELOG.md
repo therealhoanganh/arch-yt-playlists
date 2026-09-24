@@ -3,7 +3,38 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.7.1 — current
+## 1.8.0 — current
+
+- **Where the video goes is a choice in the download popup.** A "Save the video"
+  dropdown under the Video + Audio buttons: *On 4T-HDD* or *In the vault*. It is
+  preset to the default, which the commands also use. His words, 2026-09-24: *"make
+  sure the default location works with command, and also have default location in
+  download popup too along with Video + Audio ..., we could have it as a slide down
+  option or something."* The default is the drive when *Videos outside the vault* is
+  set, except in a folder listed in the new setting *Keep videos in the vault in these
+  folders*: the sensitive ones, like Psycho-history's `Temp Videos`, which his table
+  keeps on the Mac (*"based on vaults and materials"*). He saw it open, and confirmed:
+  *"Yes, it open and there is location slide down in it."*
+- **An unplugged drive no longer blocks a single download.** The drive's entry is
+  disabled, and the video goes in the vault. Being there only for that reason, it is
+  queued to move to the drive once the drive is back. A run of several videos with no
+  choice made still refuses, so a whole playlist never lands on the Mac by default;
+  choosing *In the vault* in the popup is what allows it. Before, every download to an
+  unplugged drive was refused.
+- **Subtitles in Media Extended.** After a video is saved to the drive, a Media Extended
+  library note (`media-lib/url-<id>.md`, with `mx-uid`, `video:` and `subtitles:`) lists
+  its `.vtt`, which stays in the vault, so the transcript works. He checked the route
+  by eye (*"Both show subtitles!"*); a probe of the player's native text tracks had
+  stayed empty meanwhile. The same note as `backup-strategy/link-subtitles.py`, which
+  wrote it for the 294 videos already on the drive.
+- Tested in `TESTFIELD` with a short video:
+  - a download to the drive, then its library note;
+  - a download with the drive pointed somewhere unplugged: vault, queued, then moved
+    once the setting was back;
+  - YT Playlists refusing a multi-video run and falling back on a single note.
+- A video queued by an unplugged drive is handed to ARCH After Clipping's `queueDriveMove`, which owns the move. Without After Clipping it stays in the vault.
+
+## 1.7.1
 
 - **A readable link to a video outside the vault, at the top of the note body:**
   `[4T-HDD: <file name>](file:///…)`. `media` has to stay a bare `file:///` URL,

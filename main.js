@@ -105,6 +105,10 @@ const DEFAULT_SETTINGS = {
   // there, under the vault's name and the folders it would have had in the
   // vault; subtitles and audio stay in the vault. Empty keeps it in the vault.
   externalVideoFolder: '',
+  // Folders (vault paths, one per line) whose videos stay in the vault even
+  // when Videos outside the vault is set: the sensitive ones. The same setting
+  // as ARCH After Clipping's.
+  keepVideosInVault: '',
   maxHeight: 1080, // 0 = best available; else 2160 | 1440 | 1080 | 720
   audioFormat: 'mp3',
   askDownloadMode: true,
@@ -345,6 +349,91 @@ module.exports = class YouTubeArchiver extends Plugin {
       return head + '\n' + todo.map((l) => l.line).join('\n') + '\n\n' + rest;
     });
     this.log('readable drive link added to the note body:', file.path);
+  }
+
+  // ---- Where a downloaded video goes, and its subtitles in Media Extended ----
+  // The same code in ARCH After Clipping and ARCH YT Playlists; change both
+  // together. His ask, 2026-09-24: a choice in the download popup, a default
+  // "based on vaults and materials" that the commands use too, and a way through
+  // when 4T-HDD is not plugged in. The default is the drive when Videos outside
+  // the vault is set, except in a folder listed in Keep videos in the vault:
+  // the sensitive ones, like Psycho-history's Temp Videos, which his table in
+  // backup-strategy/Videos Outside the Vault.md keeps on the Mac.
+  keepsVideosInVault(notePath) {
+    return String(this.settings.keepVideosInVault || '')
+      .split(/[\n,]/)
+      .map((s) => s.trim().replace(/^\/+|\/+$/g, ''))
+      .filter(Boolean)
+      .some((f) => notePath === f || notePath.startsWith(f + '/'));
+  }
+
+  // { place: 'drive' | 'vault', drive, mounted, fallback }. drive is the
+  // drive's name when there is one to choose, null when the video can only go
+  // in the vault. fallback marks "the vault only because the drive is not
+  // plugged in": that video moves to the drive later, one chosen for the vault
+  // never does.
+  videoPlace(external, notePath) {
+    if (!external) return { place: 'vault', drive: null, mounted: false, fallback: false };
+    const drive = path.basename(driveOf(external) || external);
+    const mounted = driveMounted(external);
+    if (this.keepsVideosInVault(notePath)) return { place: 'vault', drive, mounted, fallback: false };
+    if (!mounted) return { place: 'vault', drive, mounted, fallback: true };
+    return { place: 'drive', drive, mounted, fallback: false };
+  }
+
+  // Media Extended 4.2.1 loads a video's subtitles from its library note: a
+  // note with an mx-uid, `video: <file URL>` and `subtitles: ["[[<vault
+  // .vtt>#lang=en]]"]`, the form its own Add resources button writes. Written
+  // for a video saved on the drive, so its transcript works while the .vtt
+  // stays in the vault, where Claude reads it and the backups keep it. Checked
+  // by eye on 2026-09-24 ("Both show subtitles!"); a probe of the player's
+  // native text tracks stayed empty meanwhile, so never test it that way.
+  // backup-strategy/link-subtitles.py writes the same note for videos already
+  // on the drive; change them together.
+  async writeLibraryNote(videoAbs, subtitleAbs) {
+    try {
+      const base =
+        this.app.vault.adapter && this.app.vault.adapter.getBasePath
+          ? this.app.vault.adapter.getBasePath()
+          : '';
+      const stem = path.basename(videoAbs).replace(/\.[^.]+$/, '');
+      const links = subtitleAbs
+        .filter((p) => base && p.startsWith(base + path.sep))
+        .map((p) => {
+          const rel = normalizePath(path.relative(base, p));
+          const lang = path.basename(p).slice(stem.length + 1).replace(/\.[^.]+$/, '');
+          return `[[${rel}${lang ? '#lang=' + lang : ''}]]`;
+        });
+      if (!links.length) return;
+      const url = pathToFileURL(videoAbs).href;
+      const existing = this.app.vault.getMarkdownFiles().find((f) => {
+        const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
+        return fm && fm['mx-uid'] && fm.video === url;
+      });
+      if (existing) {
+        await this.app.fileManager.processFrontMatter(existing, (fm) => {
+          const have = Array.isArray(fm.subtitles) ? fm.subtitles : fm.subtitles ? [fm.subtitles] : [];
+          const add = links.filter((l) => !have.includes(l));
+          if (add.length) fm.subtitles = [...have, ...add];
+        });
+        this.log('subtitles listed in the existing Media Extended library note:', existing.path);
+        return;
+      }
+      const abc = 'abcdefghijklmnopqrstuvwxyz';
+      const pick = (s) => s[Math.floor(Math.random() * s.length)];
+      let uid = pick(abc);
+      for (let i = 0; i < 23; i++) uid += pick(abc + '0123456789');
+      const folder = 'media-lib';
+      if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder).catch(() => {});
+      const note = `${folder}/url-${uid.slice(0, 8)}.md`;
+      await this.app.vault.create(
+        note,
+        `---\nmx-uid: ${uid}\nvideo: ${url}\nsubtitles:\n${links.map((l) => `  - "${l}"`).join('\n')}\n---\n`
+      );
+      this.log('Media Extended library note written, so the subtitles load:', note);
+    } catch (e) {
+      console.warn('[ARCH] could not write the Media Extended library note:', e);
+    }
   }
 
   // Videos outside the vault are played by Media Extended, which reads the
@@ -1054,20 +1143,23 @@ module.exports = class YouTubeArchiver extends Plugin {
   // its own notice and summary, so six playlists queued in a row report six
   // times. A single note used to go straight to the download queue, which
   // gave no sign it was waiting and popped its mode prompt minutes later.
-  async bulkDownload(files, mode) {
+  async bulkDownload(files, mode, place) {
     const what = files.length === 1 ? `"${files[0].basename}"` : `${files.length} notes`;
-    if (!mode) mode = await this.askMode(what);
+    if (!mode) {
+      mode = await this.askMode(what, files.length ? this.placeInfoFor(files[0]) : null);
+      place = this.askedPlace;
+    }
     if (!mode || mode === 'skip') return;
     if (this.bulkRunning) {
       this.log(`queued ${what} behind the running download`);
       this.toast(`Queued ${what}; starts when the current download finishes.`);
     }
-    const run = () => this.runBulk(files, mode);
+    const run = () => this.runBulk(files, mode, place);
     this._bulkChain = (this._bulkChain || Promise.resolve()).then(run, run);
     return this._bulkChain;
   }
 
-  async runBulk(files, mode) {
+  async runBulk(files, mode, place) {
     if (this.aborted) return { ok: 0, skipped: 0, failed: 0 };
     this.bulkRunning = true;
     const notice = new Notice(`Downloading media: 0 / ${files.length}`, 0);
@@ -1075,7 +1167,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     try {
       for (const f of files) {
         if (!this.bulkRunning) break; // unload aborts the loop
-        const r = await this.downloadMediaFor(f, mode);
+        const r = await this.downloadMediaFor(f, mode, place, { bulk: files.length > 1 });
         if (r.ok && r.reason === 'already downloaded') skipped++;
         else if (r.ok) ok++;
         else failed++;
@@ -1136,15 +1228,32 @@ module.exports = class YouTubeArchiver extends Plugin {
     return found;
   }
 
-  askMode(name) {
+  // Resolves the mode; the place chosen in the popup (1.8.0) is left in
+  // this.askedPlace for the caller, null when no popup was shown.
+  askMode(name, placeInfo) {
+    this.askedPlace = this.sessionPlace || null;
     if (this.sessionMode) return Promise.resolve(this.sessionMode);
     if (!this.settings.askDownloadMode) return Promise.resolve(this.settings.defaultDownloadMode);
     return new Promise((resolve) => {
-      new DownloadModeModal(this.app, name, (mode, remember) => {
-        if (remember && mode) this.sessionMode = mode;
-        resolve(mode);
-      }).open();
+      new DownloadModeModal(
+        this.app,
+        name,
+        (mode, remember, place) => {
+          if (remember && mode) {
+            this.sessionMode = mode;
+            this.sessionPlace = place;
+          }
+          this.askedPlace = place || null;
+          resolve(mode);
+        },
+        placeInfo
+      ).open();
     });
+  }
+
+  placeInfoFor(file) {
+    const noteFolder = file.parent ? file.parent.path : '';
+    return this.videoPlace(this.externalVideoFolder(noteFolder), file.path);
   }
 
   // Downloads run one at a time whatever started them. A bulk run and the
@@ -1155,7 +1264,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     return this._chain;
   }
 
-  async downloadMediaFor(file, mode) {
+  async downloadMediaFor(file, mode, place, opts = {}) {
     if (!this._inFlight) this._inFlight = new Set();
     if (this._inFlight.has(file.path)) {
       this.log('already downloading, ignoring the repeat:', file.path);
@@ -1163,13 +1272,13 @@ module.exports = class YouTubeArchiver extends Plugin {
     }
     this._inFlight.add(file.path);
     try {
-      return await this.enqueue(() => this.runDownloadFor(file, mode));
+      return await this.enqueue(() => this.runDownloadFor(file, mode, place, opts));
     } finally {
       this._inFlight.delete(file.path);
     }
   }
 
-  async runDownloadFor(file, mode) {
+  async runDownloadFor(file, mode, place, opts = {}) {
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter ?? {};
     const url = this.urlFromNote(fm);
     if (!url) {
@@ -1187,7 +1296,10 @@ module.exports = class YouTubeArchiver extends Plugin {
       return { ok: true, reason: 'already downloaded' };
     }
 
-    if (!mode) mode = await this.askMode(file.basename);
+    if (!mode) {
+      mode = await this.askMode(file.basename, this.placeInfoFor(file));
+      place = this.askedPlace || place;
+    }
     if (!mode || mode === 'skip') {
       this.log('download skipped by user:', url);
       return { ok: false, reason: 'skipped' };
@@ -1198,15 +1310,31 @@ module.exports = class YouTubeArchiver extends Plugin {
     // outside the vault is set, and the same folder when it is not.
     const noteFolder = file.parent ? file.parent.path : '';
     const folder = this.resolveMediaFolder(noteFolder);
-    const external = this.externalVideoFolder(noteFolder);
-    const videoFolder = external || folder;
     const wantsVideo = mode === 'video_only' || mode === 'video_and_audio';
-    if (external && wantsVideo && !driveMounted(external)) {
-      // Never falls back to the vault, and never creates the folder: on an
-      // unplugged drive that would be a folder on the Mac's own disk.
-      this.log('video not downloaded, the drive is not plugged in:', external);
-      this.toast(`${driveOf(external)} is not plugged in, so "${file.basename}" was not downloaded.`);
-      return { ok: false, reason: 'drive not plugged in' };
+    // Where the video goes (1.8.0): the popup's choice, else the default. An
+    // unplugged drive is never written to (a folder under /Volumes would be on
+    // the Mac's own disk). A single video then goes in the vault and is queued,
+    // through ARCH After Clipping, to move once the drive is back. A run of
+    // several videos with no choice made refuses instead, so a whole playlist
+    // never lands on the Mac by default; choosing "In the vault" in the popup
+    // is what lets it.
+    const driveFolder = this.externalVideoFolder(noteFolder);
+    const info = this.videoPlace(driveFolder, file.path);
+    if (!place) {
+      if (wantsVideo && info.fallback && opts.bulk) {
+        this.log('video not downloaded, the drive is not plugged in:', driveFolder);
+        this.toast(`${info.drive} is not plugged in, so "${file.basename}" was not downloaded.`);
+        return { ok: false, reason: 'drive not plugged in' };
+      }
+      place = info.place;
+    }
+    if (place === 'drive' && !info.mounted) place = 'vault';
+    const fallback = !!(driveFolder && wantsVideo && place === 'vault' && !info.mounted && !this.keepsVideosInVault(file.path));
+    const external = place === 'drive' ? driveFolder : null;
+    const videoFolder = external || folder;
+    if (fallback) {
+      this.log('drive not plugged in, the video goes in the vault for now:', driveFolder);
+      this.toast(`${info.drive} is not plugged in, so the video of "${file.basename}" is saved in the vault.`);
     }
     try {
       fs.mkdirSync(folder, { recursive: true });
@@ -1337,7 +1465,18 @@ module.exports = class YouTubeArchiver extends Plugin {
       return `[[${abs.slice(base.length + 1).split('/').pop()}]]`;
     });
     await this.setFrontmatterFields(file, { media: links.length === 1 ? links[0] : links, 'dl-ed': true });
+    const onDrive = saved.filter((abs) => (!base || !abs.startsWith(base + path.sep)) && /\.(mp4|webm|mkv|mov|avi|m4v)$/i.test(abs));
     await this.addDriveLinks(file, saved.filter((abs) => !base || !abs.startsWith(base + path.sep)));
+    for (const v of onDrive) await this.writeLibraryNote(v, this.subtitlesNamed(folder, rawStem));
+    if (fallback) {
+      // After Clipping owns the queue and the move; without it the video
+      // simply stays in the vault, and move-videos-out.py can move it later.
+      const ac = this.app.plugins?.getPlugin?.('arch-after-clipping');
+      for (const v of saved.filter((p) => /\.(mp4|webm|mkv|mov|avi|m4v)$/i.test(p))) {
+        if (ac && typeof ac.queueDriveMove === 'function') ac.queueDriveMove(file.path, v);
+        else this.log('ARCH After Clipping is not enabled, so this video stays in the vault:', v);
+      }
+    }
     this.log('media saved:', saved.join(', '));
     return { ok: true, files: saved };
   }
@@ -2000,13 +2139,42 @@ class SetupModal extends Modal {
   onClose() { this.contentEl.empty(); }
 }
 
+// The "Save the video" dropdown in the download popup (1.16.0). Shown only
+// when Videos outside the vault is set. Preselects the default place; the
+// drive's entry is disabled while it is not plugged in, so the vault is what
+// is left. The same function is in ARCH YT Playlists; change both together.
+function renderPlaceChoice(el, info, onPick) {
+  if (!info || !info.drive) return;
+  const row = el.createDiv({
+    attr: { style: 'display:flex; align-items:center; gap:8px; margin-top:10px;' },
+  });
+  row.createEl('label', { text: 'Save the video:', attr: { style: 'font-size:var(--font-ui-smaller);' } });
+  const sel = row.createEl('select', { cls: 'dropdown' });
+  const drive = sel.createEl('option', {
+    text: info.mounted ? `On ${info.drive}` : `On ${info.drive} (not plugged in)`,
+    attr: { value: 'drive' },
+  });
+  if (!info.mounted) drive.disabled = true;
+  sel.createEl('option', { text: 'In the vault', attr: { value: 'vault' } });
+  sel.value = info.place;
+  sel.onchange = () => onPick(sel.value);
+  if (info.fallback) {
+    el.createEl('p', {
+      text: `${info.drive} is not plugged in, so the video goes in the vault for now and moves to the drive once it is back (if that setting is on).`,
+      attr: { style: 'font-size:var(--font-ui-smaller); opacity:.7; margin-top:4px;' },
+    });
+  }
+}
+
 class DownloadModeModal extends Modal {
-  constructor(app, name, done) {
+  constructor(app, name, done, placeInfo) {
     super(app);
     this.name = name;
     this.done = done;
     this.answered = false;
     this.remember = false;
+    this.placeInfo = placeInfo || null;
+    this.place = placeInfo ? placeInfo.place : 'vault';
   }
 
   onOpen() {
@@ -2027,6 +2195,10 @@ class DownloadModeModal extends Modal {
       b.onclick = () => this.finish(value);
     }
 
+    renderPlaceChoice(contentEl, this.placeInfo, (p) => {
+      this.place = p;
+    });
+
     const remember = contentEl.createDiv();
     const cb = remember.createEl('input', { type: 'checkbox' });
     cb.id = 'arch-yt-remember';
@@ -2042,7 +2214,7 @@ class DownloadModeModal extends Modal {
   finish(mode) {
     this.answered = true;
     this.close();
-    this.done(mode, this.remember);
+    this.done(mode, this.remember, this.place);
   }
 
   onClose() {
@@ -2384,6 +2556,23 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
           .setValue(s.externalVideoFolder || '')
           .onChange(async (v) => {
             s.externalVideoFolder = v.trim();
+            await this.save();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Keep videos in the vault in these folders')
+      .setDesc(
+        'Vault folders, one per line, whose videos stay in the vault even when Videos outside the vault is set: ' +
+          'the sensitive ones, like Temp Videos. Their default in the download popup and for the commands is the vault. ' +
+          'ARCH After Clipping has the same setting; keep the two the same.'
+      )
+      .addTextArea((t) =>
+        t
+          .setPlaceholder('Temp Videos')
+          .setValue(s.keepVideosInVault || '')
+          .onChange(async (v) => {
+            s.keepVideosInVault = v;
             await this.save();
           })
       );
