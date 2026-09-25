@@ -423,7 +423,10 @@ module.exports = class YouTubeArchiver extends Plugin {
       const pick = (s) => s[Math.floor(Math.random() * s.length)];
       let uid = pick(abc);
       for (let i = 0; i < 23; i++) uid += pick(abc + '0123456789');
-      const folder = 'media-lib';
+      // In the vault's `_` tooling folder, not Media Extended's default `media-lib`
+      // at the root: one note per drive video cluttered the vault (his request,
+      // 2026-09-25). Existing notes are found by mx-uid anywhere, above.
+      const folder = '_/media-lib';
       if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder).catch(() => {});
       const note = `${folder}/url-${uid.slice(0, 8)}.md`;
       await this.app.vault.create(
