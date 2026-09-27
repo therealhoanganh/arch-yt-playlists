@@ -12,3 +12,6 @@ node_modules/
 
 # Release build output; produced by `npm run build`, attached to releases
 dist/
+
+# Tools the plugin installs for itself (yt-dlp), as in ARCH X Twitter
+bin/
