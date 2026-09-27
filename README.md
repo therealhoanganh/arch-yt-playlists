@@ -28,9 +28,9 @@ To upgrade, replace `main.js`, `manifest.json` and the `lib/` folder — your se
 
 ## Syncing
 
-Add playlists in settings — a full URL, a bare playlist ID, or one of the shortcuts `Watch Later`, `Liked`, `History`, `Subscriptions` — then run **Sync all playlists**.
+Add playlists in settings — a full URL, a bare playlist ID, or one of the shortcuts `Watch Later`, `Liked`, `History`, `Subscriptions` — then run **Sync All Playlists**.
 
-A sync is one fast call. It enumerates the playlist and writes every note immediately; it does **not** fetch transcripts, because that was a per-video pass doing work most videos never need. Run **Fetch details and transcript for this note** on the ones you care about.
+A sync is one fast call. It enumerates the playlist and writes every note immediately; it does **not** fetch transcripts, because that was a per-video pass doing work most videos never need. Run **Fetch Details and Transcript for This Note** on the ones you care about.
 
 Re-syncing is safe. A video already in the vault is not duplicated, and a video that appears in several playlists accumulates them in `yt-playlist` rather than being skipped.
 
@@ -55,7 +55,7 @@ tags:
 
 ## Downloading media
 
-**Download media for this playlist note** (or **Download subtitles for this playlist note**) from the command palette while a playlist note is open, or right-click the playlist note. Select several video notes and right-click for a bulk download. A single video note is downloaded with ARCH After Clipping's **Download video / audio / subtitles for this note** commands, which hand the note back to this plugin with the choice made, so the file lands with the rest of its playlist.
+**Download Media for This Playlist Note** (or **Download Subtitles for This Playlist Note**) from the command palette while a playlist note is open, or right-click the playlist note. Select several video notes and right-click for a bulk download. A single video note is downloaded with ARCH After Clipping's **Download video / audio / subtitles for this note** commands, which hand the note back to this plugin with the choice made, so the file lands with the rest of its playlist.
 
 You are asked once what you want — Video + Audio, Video, Audio, or Skip — with a **use this for the rest of this session** checkbox, so a bulk run of fifty asks once.
 
@@ -67,7 +67,7 @@ Some details that matter:
 
 **Downloads run one at a time**, whatever started them. A bulk run and the keyboard shortcut share one queue, so they cannot overlap and split your bandwidth.
 
-**Only one subtitle track is kept.** `--sub-langs en.*` matches `en`, `en-US`, `en-GB`, `en-orig` and every auto-translated English variant — nine files on some videos. Which tracks exist is not knowable before downloading, so the extras are removed afterwards, keeping the plain language code first and the original-language track next. Turn off *Keep only the best subtitle* if you want them all.
+**Only one subtitle track is kept.** `--sub-langs en.*` matches `en`, `en-US`, `en-GB`, `en-orig` and every auto-translated English variant — nine files on some videos. Which tracks exist is not knowable before downloading, so the extras are removed afterwards, keeping the plain language code first and the original-language track next. Turn off *Keep Only the Best Subtitle* if you want them all.
 
 ## Where files go
 
@@ -75,7 +75,7 @@ Thumbnails and media each offer the same choices as Obsidian's own attachment se
 
 ## Note names
 
-Video notes are named from **Note name**, default `{{channel}} — {{title}}`. Playlist notes have their own setting, **Playlist note name**, default `{{channel}} – {{title}}`, where `{{channel}}` is the playlist's *owner* — so a playlist called `Writing 1` owned by `Sylvie` becomes `Sylvie – Writing 1`.
+Video notes are named from **Note Name**, default `{{channel}} — {{title}}`. Playlist notes have their own setting, **Playlist Note Name**, default `{{channel}} – {{title}}`, where `{{channel}}` is the playlist's *owner* — so a playlist called `Writing 1` owned by `Sylvie` becomes `Sylvie – Writing 1`.
 
 A per-source playlist note name feeds `{{title}}` rather than replacing the whole name, because yt-dlp's title for a shortcut like Watch Later is not what you want to link to — that is a better title, not a reason to drop the owner. Set the template to `{{title}}` alone if you want the literal name back.
 
@@ -89,9 +89,9 @@ A per-source playlist note name feeds `{{title}}` rather than replacing the whol
 
 So it is filled after the notes exist rather than while they are being listed:
 
-- **Automatically, at the end of a sync.** The notes are written and usable first, then the dates are fetched. If every note already has one the pass is skipped without calling yt-dlp at all, so re-syncing a playlist costs nothing. Turn it off with **Fill publish dates after a sync** if you would rather do it by hand.
-- **Fill publish dates for this playlist** — command palette or right-click a playlist note — does the same thing on demand. Around 2.3 seconds a video.
-- **Fetch details and transcript for this note** writes it as a side effect. That call already fetches full metadata, so the date costs nothing extra.
+- **Automatically, at the end of a sync.** The notes are written and usable first, then the dates are fetched. If every note already has one the pass is skipped without calling yt-dlp at all, so re-syncing a playlist costs nothing. Turn it off with **Fill Publish Dates after a Sync** if you would rather do it by hand.
+- **Fill Publish Dates for This Playlist** — command palette or right-click a playlist note — does the same thing on demand. Around 2.3 seconds a video.
+- **Fetch Details and Transcript for This Note** writes it as a side effect. That call already fetches full metadata, so the date costs nothing extra.
 
 Notes that already carry the right date are left untouched rather than rewritten, so a run does not churn modification times across the vault.
 

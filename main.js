@@ -183,7 +183,7 @@ module.exports = class YouTubeArchiver extends Plugin {
         if (notes.length < 2) return;
         menu.addItem((item) =>
           item
-            .setTitle(`Download media for ${notes.length} notes`)
+            .setTitle(`Download Media for ${notes.length} Notes`)
             .setIcon('download')
             .onClick(() => this.bulkDownload(notes))
         );
@@ -196,19 +196,19 @@ module.exports = class YouTubeArchiver extends Plugin {
         if (fm && fm['dl-all'] !== undefined) {
           menu.addItem((item) =>
             item
-              .setTitle('Download media for this playlist note')
+              .setTitle('Download Media for This Playlist Note')
               .setIcon('download')
               .onClick(() => this.downloadWholePlaylist(file))
           );
           menu.addItem((item) =>
             item
-              .setTitle('Download subtitles for this playlist note')
+              .setTitle('Download Subtitles for This Playlist Note')
               .setIcon('subtitles')
               .onClick(() => this.downloadWholePlaylist(file, 'subs_only'))
           );
           menu.addItem((item) =>
             item
-              .setTitle('Fill publish dates for this playlist')
+              .setTitle('Fill Publish Dates for This Playlist')
               .setIcon('calendar')
               .onClick(() => this.fillPlaylistDates(file))
           );
@@ -223,7 +223,7 @@ module.exports = class YouTubeArchiver extends Plugin {
 
     this.addSettingTab(new YouTubeArchiverSettingTab(this.app, this));
 
-    this.addRibbonIcon('download', 'Sync YouTube playlists', () => this.syncAll());
+    this.addRibbonIcon('download', 'Sync YouTube Playlists', () => this.syncAll());
     this.app.workspace.onLayoutReady(() => this.checkMediaExtended());
 
     if (!this.settings.setupDone) {
@@ -232,12 +232,12 @@ module.exports = class YouTubeArchiver extends Plugin {
         const filled = await this.autoConfigure(report);
         this.settings.setupDone = true;
         await this.saveSettings();
-        if (filled.length) new Notice(`ARCH YT Playlists configured itself: ${filled.length} setting(s).`, 8000);
+        if (filled.length) new Notice(`ARCH YT Playlists configured itself: ${plural(filled.length, 'setting')}.`, 8000);
       });
     }
     this.addCommand({
       id: 'sync-all',
-      name: 'Sync all playlists',
+      name: 'Sync All Playlists',
       callback: () => this.syncAll(),
     });
     // obsidian://arch-yt-download?vault=<name>&file=<playlist note path>&mode=<mode>
@@ -264,7 +264,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     });
     this.addCommand({
       id: 'download-playlist-media',
-      name: 'Download media for this playlist note',
+      name: 'Download Media for This Playlist Note',
       checkCallback: (checking) => {
         const f = this.app.workspace.getActiveFile();
         if (!f || f.extension !== 'md') return false;
@@ -276,7 +276,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     });
     this.addCommand({
       id: 'download-playlist-subtitles',
-      name: 'Download subtitles for this playlist note',
+      name: 'Download Subtitles for This Playlist Note',
       checkCallback: (checking) => {
         const f = this.app.workspace.getActiveFile();
         if (!f || f.extension !== 'md') return false;
@@ -288,7 +288,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     });
     this.addCommand({
       id: 'fill-playlist-dates',
-      name: 'Fill publish dates for this playlist',
+      name: 'Fill Publish Dates for This Playlist',
       checkCallback: (checking) => {
         const f = this.app.workspace.getActiveFile();
         if (!f || f.extension !== 'md') return false;
@@ -300,22 +300,22 @@ module.exports = class YouTubeArchiver extends Plugin {
     });
     this.addCommand({
       id: 'setup',
-      name: 'Set up external tools',
+      name: 'Set Up External Tools',
       callback: () => this.setup(),
     });
     this.addCommand({
       id: 'fetch-details',
-      name: 'Fetch details and transcript for this note',
+      name: 'Fetch Details and Transcript for This Note',
       callback: () => this.hydrateActive(),
     });
     this.addCommand({
       id: 'sync-prompt',
-      name: 'Sync one playlist or channel by URL',
+      name: 'Sync One Playlist or Channel by URL',
       callback: () => this.syncPrompt(),
     });
     this.addCommand({
       id: 'sync-channels',
-      name: 'Sync channels',
+      name: 'Sync Channels',
       callback: () => this.syncChannels(),
     });
   }
@@ -602,7 +602,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
     const id = fm && videoIdFromUrl(fm.url);
     if (!id) return new Notice('No YouTube address in this note\u2019s url property.');
-    const n = this.notice('Fetching details...', 0);
+    const n = this.notice('Fetching details…', 0);
     try {
       const r = await this.archiver().hydrateOne(file, id);
       n.hide();
@@ -618,10 +618,10 @@ module.exports = class YouTubeArchiver extends Plugin {
     const plugin = this;
     class PromptModal extends Modal {
       onOpen() {
-        this.titleEl.setText('Sync a playlist or channel');
+        this.titleEl.setText('Sync a Playlist or Channel');
         const input = this.contentEl.createEl('input', {
           type: 'text',
-          attr: { placeholder: 'Playlist URL, playlist id, Watch Later, or a channel URL / @handle', style: 'width:100%;' },
+          attr: { placeholder: 'Playlist URL, playlist id, Watch Later, or a channel URL / @handle\u2026', 'aria-label': 'Playlist or channel', spellcheck: 'false', style: 'width:100%;' },
         });
         const row = this.contentEl.createDiv({
           attr: { style: 'display:flex; gap:8px; margin-top:12px;' },
@@ -690,7 +690,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     this.aborted = false;
     const started = Date.now();
     let created = 0, updated = 0, failed = 0;
-    const n = this.notice(`Syncing ${targets.length} channel${targets.length === 1 ? '' : 's'}...`, 0);
+    const n = this.notice(`Syncing ${targets.length} channel${targets.length === 1 ? '' : 's'}…`, 0);
     this.log(`syncing ${targets.length} channels into ${this.resolveChannelFolder() || 'the vault root'}`);
     try {
       for (let i = 0; i < targets.length; i++) {
@@ -720,7 +720,7 @@ module.exports = class YouTubeArchiver extends Plugin {
   // One channel from the prompt. Not added to the list: the list is what gets
   // re-synced, and a one-off is a one-off.
   async syncOneChannel(target) {
-    const n = this.notice('Fetching channel...', 0);
+    const n = this.notice('Fetching channel…', 0);
     try {
       const r = await this.syncChannel(target);
       n.hide();
@@ -1101,7 +1101,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     this.log(`date fill for ${playlistFile.basename}: ${missing.length} of ${byId.size} note(s) need a date`);
 
     this.datesRunning = true;
-    const notice = this.notice(`Fetching ${missing.length} publish date(s)...`, 0);
+    const notice = this.notice(`Fetching ${plural(missing.length, 'publish date')}…`, 0);
     let seen = 0, written = 0, noDate = 0, unmatched = 0;
     try {
       await this.archiver().hydrate(urls, async (j) => {
@@ -1113,7 +1113,7 @@ module.exports = class YouTubeArchiver extends Plugin {
         if (!published) { noDate++; return; }
         await this.setFrontmatterFields(file, { published });
         written++;
-        if (written % 10 === 0) notice.setMessage(`${written} of ${missing.length} date(s)...`);
+        if (written % 10 === 0) notice.setMessage(`${written} of ${plural(missing.length, 'date')}…`);
       }, false);
       notice.hide();
       this.log(`date fill done: ${seen} seen, ${written} written, ${noDate} without a date, ${unmatched} unexpected`);
@@ -1121,7 +1121,7 @@ module.exports = class YouTubeArchiver extends Plugin {
       // only worth showing when it actually did something.
       if (!opts.auto || written) {
         this.toast(
-          `${playlistFile.basename}: ${written} publish date(s) written` +
+          `${playlistFile.basename}: ${plural(written, 'publish date')} written` +
             (noDate ? `, ${noDate} with no date from YouTube` : ''),
           10000
         );
@@ -1351,7 +1351,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     // form is kept for matching files on disk.
     const rawStem = String(file.basename).replace(/[\\/:*?"<>|]/g, ' ').trim();
     const stem = rawStem.replace(/%/g, '%%');
-    const notice = new Notice(`Downloading media for "${file.basename}"...`, 0);
+    const notice = new Notice(`Downloading media for "${file.basename}"…`, 0);
     const saved = [];
     try {
       if (mode === 'video_only' || mode === 'video_and_audio') {
@@ -1816,18 +1816,18 @@ module.exports = class YouTubeArchiver extends Plugin {
     const filled = [];
     if (report.ytdlp.found && path.isAbsolute(report.ytdlp.path) && report.ytdlp.path !== this.settings.ytDlpPath) {
       this.settings.ytDlpPath = report.ytdlp.path;
-      filled.push(`yt-dlp path \u2192 ${report.ytdlp.path}`);
+      filled.push(`yt-dlp Path \u2192 ${report.ytdlp.path}`);
     }
     if (report.ffmpeg.found && path.isAbsolute(report.ffmpeg.path)) {
       const dir = path.dirname(report.ffmpeg.path);
       if (dir !== this.settings.ffmpegLocation) {
         this.settings.ffmpegLocation = dir;
-        filled.push(`ffmpeg folder \u2192 ${dir}`);
+        filled.push(`ffmpeg Folder \u2192 ${dir}`);
       }
     }
     if (!this.settings.cookiesFile && !this.settings.cookiesFromBrowser && report.browsers.length) {
       this.settings.cookiesFromBrowser = report.browsers[0].name;
-      filled.push(`Cookies from browser \u2192 ${report.browsers[0].name}`);
+      filled.push(`Cookies from Browser \u2192 ${report.browsers[0].name}`);
     }
     if (filled.length) await this.saveSettings();
     return filled;
@@ -1863,7 +1863,7 @@ module.exports = class YouTubeArchiver extends Plugin {
   }
 
   async installYtDlp() {
-    const n = this.notice('Fetching yt-dlp...', 0);
+    const n = this.notice('Fetching yt-dlp…', 0);
     try {
       fs.mkdirSync(this.binDir(), { recursive: true });
       const dest = path.join(this.binDir(), this.exeName('yt-dlp'));
@@ -1893,17 +1893,17 @@ module.exports = class YouTubeArchiver extends Plugin {
   }
 
   async updateYtDlp() {
-    const n = this.notice('Updating yt-dlp...', 0);
+    const n = this.notice('Updating yt-dlp…', 0);
     const bin = this.settings.ytDlpPath || 'yt-dlp';
     let r = await this.runProcess(bin, ['-U'], 180000).catch((e) => ({ code: 1, stdout: '', stderr: String(e.message) }));
     const all = r.stdout + r.stderr;
     if (r.code === 0 && !/ERROR/i.test(all)) { n.hide(); new Notice(all.trim().split('\n').slice(-1)[0] || 'Up to date.', 8000); return; }
     n.hide();
-    new Notice('yt-dlp could not self-update. Use Install standalone, or update it the way you installed it.', 12000);
+    new Notice('yt-dlp could not self-update. Use Install Standalone, or update it the way you installed it.', 12000);
   }
 
   async setup() {
-    const n = this.notice('Looking for yt-dlp, ffmpeg, browsers...', 0);
+    const n = this.notice('Looking for yt-dlp, ffmpeg, browsers…', 0);
     const report = await this.detectTools();
     const filled = await this.autoConfigure(report);
     n.hide();
@@ -1929,7 +1929,7 @@ module.exports = class YouTubeArchiver extends Plugin {
       }
     }
     if (!file) {
-      new Notice('No Clip Archiver settings found. Enter the paths manually.', 8000);
+      new Notice('No After Clipping settings found. Enter the paths manually.', 8000);
       return false;
     }
     try {
@@ -1949,11 +1949,11 @@ module.exports = class YouTubeArchiver extends Plugin {
         }
       }
       await this.saveSettings();
-      new Notice(`Copied ${copied.length} setting(s) from Clip Archiver.`, 8000);
+      new Notice(`Copied ${plural(copied.length, 'setting')} from After Clipping.`, 8000);
       return true;
     } catch (e) {
       console.error('[ArchYTPlaylists] import failed:', e);
-      new Notice('Could not read Clip Archiver settings.', 8000);
+      new Notice('Could not read After Clipping settings.', 8000);
       return false;
     }
   }
@@ -2040,6 +2040,9 @@ module.exports = class YouTubeArchiver extends Plugin {
   }
 };
 
+// "1 video", "3 videos": a count and its word, never "video(s)".
+function plural(n, word) { return `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`; }
+
 class SetupModal extends Modal {
   constructor(app, plugin, report, filled) {
     super(app);
@@ -2049,7 +2052,7 @@ class SetupModal extends Modal {
   }
 
   onOpen() {
-    this.titleEl.setText('External tools');
+    this.titleEl.setText('External Tools');
     this.render();
   }
 
@@ -2061,10 +2064,16 @@ class SetupModal extends Modal {
 
   row(label, ok, detail, action) {
     const st = new Setting(this.contentEl).setName(label).setDesc(detail);
+    // A different mark per state, not only a different colour: ● all right,
+    // ▲ worth a look, ○ missing; the word is the tooltip.
     st.nameEl.prepend(
       createSpan({
-        text: ok === true ? '\u25CF ' : ok === 'warn' ? '\u25CF ' : '\u25CB ',
-        attr: { style: `color: var(--color-${ok === true ? 'green' : ok === 'warn' ? 'yellow' : 'red'});` },
+        text: ok === true ? '\u25CF ' : ok === 'warn' ? '\u25B2 ' : '\u25CB ',
+        attr: {
+          style: `color: var(--color-${ok === true ? 'green' : ok === 'warn' ? 'yellow' : 'red'});`,
+          title: ok === true ? 'All right' : ok === 'warn' ? 'Worth a look' : 'Missing',
+          'aria-label': ok === true ? 'All right' : ok === 'warn' ? 'Worth a look' : 'Missing',
+        },
       })
     );
     if (action) st.addButton((b) => b.setButtonText(action.label).onClick(action.onClick));
@@ -2104,7 +2113,7 @@ class SetupModal extends Modal {
     );
     if (r.ytdlp.found) {
       ytRow.addButton((b) =>
-        b.setButtonText('Install standalone')
+        b.setButtonText('Install Standalone')
           .setTooltip('Downloads a self-updating copy here. Your existing install is left alone.')
           .onClick(async () => { await this.plugin.installYtDlp(); this.refresh(); })
       );
@@ -2112,7 +2121,7 @@ class SetupModal extends Modal {
 
     this.row('ffmpeg', r.ffmpeg.found, r.ffmpeg.found ? `${r.ffmpeg.version}\n${r.ffmpeg.path}` : 'Only needed if you extract audio. Syncing does not use it.', null);
 
-    this.row('JavaScript runtime', r.jsRuntime.found ? true : 'warn',
+    this.row('JavaScript Runtime', r.jsRuntime.found ? true : 'warn',
       r.jsRuntime.found ? `${r.jsRuntime.name} ${r.jsRuntime.version}` : 'yt-dlp uses one to solve YouTube challenges. Install Deno or Node and it is picked up automatically.', null);
 
     let cookieDetail = 'None configured. Watch Later, Liked and private playlists need cookies.';
@@ -2135,7 +2144,7 @@ class SetupModal extends Modal {
     }
 
     new Setting(contentEl)
-      .addButton((b) => b.setButtonText('Check again').onClick(() => this.refresh()))
+      .addButton((b) => b.setButtonText('Check Again').onClick(() => this.refresh()))
       .addButton((b) => b.setButtonText('Close').setCta().onClick(() => this.close()));
   }
 
@@ -2151,8 +2160,8 @@ function renderPlaceChoice(el, info, onPick) {
   const row = el.createDiv({
     attr: { style: 'display:flex; align-items:center; gap:8px; margin-top:10px;' },
   });
-  row.createEl('label', { text: 'Save the video:', attr: { style: 'font-size:var(--font-ui-smaller);' } });
-  const sel = row.createEl('select', { cls: 'dropdown' });
+  row.createEl('label', { text: 'Save the video:', attr: { for: 'arch-save-video-place', style: 'font-size:var(--font-ui-smaller);' } });
+  const sel = row.createEl('select', { cls: 'dropdown', attr: { id: 'arch-save-video-place' } });
   const drive = sel.createEl('option', {
     text: info.mounted ? `On ${info.drive}` : `On ${info.drive} (not plugged in)`,
     attr: { value: 'drive' },
@@ -2180,12 +2189,18 @@ class DownloadModeModal extends Modal {
     this.place = placeInfo ? placeInfo.place : 'vault';
   }
 
+  // Laid out like After Clipping's DownloadModeModal, which asks the same
+  // question: same title, buttons, explanation and remember box, and Enter
+  // picks Video + Audio.
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl('h3', { text: 'Download media' });
+    this.titleEl.setText('Download This Media?');
     contentEl.createEl('p', { text: this.name });
 
-    const row = contentEl.createDiv({ cls: 'modal-button-container' });
+    const row = contentEl.createDiv({
+      attr: { style: 'display:flex; flex-wrap:wrap; gap:8px; margin-top:14px;' },
+    });
+    let first = null;
     for (const [value, label] of [
       ['video_and_audio', 'Video + Audio'],
       ['video_only', 'Video'],
@@ -2194,24 +2209,33 @@ class DownloadModeModal extends Modal {
       ['skip', 'Skip'],
     ]) {
       const b = row.createEl('button', { text: label });
-      if (value === 'video_and_audio') b.addClass('mod-cta');
+      if (value === 'video_and_audio') { b.addClass('mod-cta'); first = b; }
       b.onclick = () => this.finish(value);
     }
+
+    contentEl.createEl('p', {
+      text: 'Video + Audio saves the video file and a separate audio file. Video saves one file with sound. Audio saves the soundtrack only. Subtitles saves only the subtitle file, where the video would go.',
+      attr: { style: 'font-size:var(--font-ui-smaller); opacity:.7; margin-top:12px;' },
+    });
 
     renderPlaceChoice(contentEl, this.placeInfo, (p) => {
       this.place = p;
     });
 
-    const remember = contentEl.createDiv();
+    const remember = contentEl.createDiv({
+      attr: { style: 'display:flex; align-items:center; gap:8px; margin-top:8px;' },
+    });
     const cb = remember.createEl('input', { type: 'checkbox' });
     cb.id = 'arch-yt-remember';
     cb.onchange = () => {
       this.remember = cb.checked;
     };
     remember.createEl('label', {
-      text: ' Use this for the rest of this session',
-      attr: { for: 'arch-yt-remember' },
+      text: 'Use this choice for the rest of this session',
+      attr: { for: 'arch-yt-remember', style: 'font-size:var(--font-ui-smaller);' },
     });
+
+    first.focus();
   }
 
   finish(mode) {
@@ -2231,6 +2255,11 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+    // Its fields hold paths, commands, patterns and lists, not prose, so no
+    // spell-check underlines; set as each one gets focus, which is when they appear.
+    this.containerEl.addEventListener('focusin', (e) => {
+      if (e.target.matches('input[type="text"], input:not([type]), textarea')) e.target.spellcheck = false;
+    });
   }
 
   save() {
@@ -2285,13 +2314,13 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       });
       new Setting(srcBox)
         .addButton((b) =>
-          b.setButtonText('Add source').onClick(async () => {
+          b.setButtonText('Add Source').onClick(async () => {
             s.sources.push({ target: '', note: '' });
             await this.save();
             renderSources();
           })
         )
-        .addButton((b) => b.setButtonText('Sync all').setCta().onClick(() => this.plugin.syncAll()));
+        .addButton((b) => b.setButtonText('Sync All').setCta().onClick(() => this.plugin.syncAll()));
     };
     renderSources();
 
@@ -2334,17 +2363,17 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     ta.addEventListener('blur', async () => { s.channelList = ta.value; await this.save(); this.display(); });
 
     new Setting(containerEl)
-      .addButton((b) => b.setButtonText('Sync channels now').setCta().onClick(() => this.plugin.syncChannels()));
+      .addButton((b) => b.setButtonText('Sync Channels Now').setCta().onClick(() => this.plugin.syncChannels()));
 
     new Setting(containerEl)
-      .setName('Channel note location')
+      .setName('Channel Note Location')
       .setDesc('Root and subfolder are relative to the archive root the playlists use.')
       .addDropdown((d) =>
         d
-          .addOption('vault', 'Vault folder')
-          .addOption('root', 'The archive root')
-          .addOption('subfolder', 'In subfolder under the archive root')
-          .addOption('specified', 'In the folder specified below')
+          .addOption('vault', 'Vault Folder')
+          .addOption('root', 'The Archive Root')
+          .addOption('subfolder', 'In Subfolder under the Archive Root')
+          .addOption('specified', 'In the Folder Specified Below')
           .setValue(s.channelLocationMode || 'specified')
           .onChange(async (v) => {
             s.channelLocationMode = v;
@@ -2354,7 +2383,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
     if (s.channelLocationMode === 'subfolder') {
       new Setting(containerEl)
-        .setName('Channel subfolder name')
+        .setName('Channel Subfolder Name')
         .addText((t) =>
           t.setValue(s.channelSubfolder).onChange(async (v) => {
             s.channelSubfolder = v.trim() || 'Channels';
@@ -2364,7 +2393,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     }
     if ((s.channelLocationMode || 'specified') === 'specified') {
       new Setting(containerEl)
-        .setName('Channel folder')
+        .setName('Channel Folder')
         .setDesc('Path from the vault root.')
         .addText((t) =>
           t.setValue(s.channelFolder).onChange(async (v) => {
@@ -2375,14 +2404,14 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName('Channel image location')
+      .setName('Channel Image Location')
       .setDesc('Where the icon and banner go. Same folder and subfolder are relative to the channel note.')
       .addDropdown((d) =>
         d
-          .addOption('vault', 'Vault folder')
-          .addOption('same', 'Same folder as the note')
-          .addOption('subfolder', 'In subfolder under the note')
-          .addOption('specified', 'In the folder specified below')
+          .addOption('vault', 'Vault Folder')
+          .addOption('same', 'Same Folder as the Note')
+          .addOption('subfolder', 'In Subfolder under the Note')
+          .addOption('specified', 'In the Folder Specified Below')
           .setValue(s.channelImageLocationMode || 'subfolder')
           .onChange(async (v) => {
             s.channelImageLocationMode = v;
@@ -2392,7 +2421,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
     if ((s.channelImageLocationMode || 'subfolder') === 'subfolder') {
       new Setting(containerEl)
-        .setName('Channel image subfolder name')
+        .setName('Channel Image Subfolder Name')
         .addText((t) =>
           t.setValue(s.channelImageSubfolder).onChange(async (v) => {
             s.channelImageSubfolder = v.trim() || 'Images';
@@ -2402,7 +2431,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     }
     if (s.channelImageLocationMode === 'specified') {
       new Setting(containerEl)
-        .setName('Channel image folder')
+        .setName('Channel Image Folder')
         .setDesc('Path from the vault root.')
         .addText((t) =>
           t.setValue(s.channelImageFolder).onChange(async (v) => {
@@ -2413,7 +2442,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName('Icon and banner file names')
+      .setName('Icon and Banner File Names')
       .setDesc('Placeholders: {{channel}} is the channel name, {{handle}} its @handle.')
       .addText((t) => t.setPlaceholder('{{channel}} Icon').setValue(s.channelIconTemplate).onChange(async (v) => {
         s.channelIconTemplate = v.trim() || DEFAULT_SETTINGS.channelIconTemplate;
@@ -2425,21 +2454,21 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       }));
 
     new Setting(containerEl)
-      .setName('Channel image format')
+      .setName('Channel Image Format')
       .setDesc('YouTube serves JPEG. WebP at quality 0.90 is about half the size and is what the rest of the vault uses.')
       .addDropdown((d) =>
-        d.addOption('webp', 'WebP').addOption('keep', 'Keep what YouTube serves')
+        d.addOption('webp', 'WebP').addOption('keep', 'Keep What YouTube Serves')
           .setValue(s.channelImageFormat || 'webp')
           .onChange(async (v) => { s.channelImageFormat = v; await this.save(); })
       );
 
     new Setting(containerEl)
-      .setName('Re-download icons and banners on every sync')
+      .setName('Re-download Icons and Banners on Every Sync')
       .setDesc('Off means an image already on disk is left alone, which is what makes a re-run of every channel cheap. Turn it on once to pick up changed pictures, then turn it off.')
       .addToggle((t) => t.setValue(!!s.refreshChannelImages).onChange(async (v) => { s.refreshChannelImages = v; await this.save(); }));
 
     new Setting(containerEl)
-      .setName('Channel note tags')
+      .setName('Channel Note Tags')
       .setDesc('Comma-separated. ARCH After Clipping leaves notes tagged yt-channel alone; change both if you change this.')
       .addText((t) =>
         t.setValue((s.channelTags || []).join(', ')).onChange(async (v) => {
@@ -2449,7 +2478,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Default properties for channel notes')
+      .setName('Default Properties for Channel Notes')
       .setDesc('Same rules as the video note defaults, e.g. c-rank: 5.')
       .addTextArea((t) => {
         t.setPlaceholder('rank: 0').setValue(s.channelNoteDefaults || '').onChange(async (v) => {
@@ -2461,7 +2490,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName('Channel note property order')
+      .setName('Channel Note Property Order')
       .setDesc('Comma-separated, same rules as the video note order.')
       .addText((t) =>
         t.setValue(s.channelNoteOrder).onChange(async (v) => {
@@ -2473,7 +2502,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('Output').setHeading();
 
     new Setting(containerEl)
-      .setName('Video note property order')
+      .setName('Video Note Property Order')
       .setDesc('Comma-separated. A property you added by hand is placed where you list it, or kept at the end if unlisted; a name the plugin does not produce and the note does not have is skipped.')
       .addText((t) =>
         t.setValue(s.videoNoteOrder).onChange(async (v) => {
@@ -2483,7 +2512,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Default properties for video notes')
+      .setName('Default Properties for Video Notes')
       .setDesc('One "key: value" per line. Written on every new note so the property is there to edit, and added to an existing note that lacks it on the next sync. A value already on a note is never changed. Position them with the order above.')
       .addTextArea((t) => {
         t.setPlaceholder('rank: 0\nstatus: Watch Later').setValue(s.videoNoteDefaults || '').onChange(async (v) => {
@@ -2495,7 +2524,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName('Playlist note property order')
+      .setName('Playlist Note Property Order')
       .setDesc('Comma-separated, same rules.')
       .addText((t) =>
         t.setValue(s.playlistNoteOrder).onChange(async (v) => {
@@ -2504,16 +2533,16 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
         })
       );
 
-    new Setting(containerEl).setName('Media download').setHeading();
+    new Setting(containerEl).setName('Media Download').setHeading();
 
     new Setting(containerEl)
-      .setName('Media location')
+      .setName('Media Location')
       .addDropdown((d) =>
         d
-          .addOption('vault', 'Vault folder')
-          .addOption('same', 'Same folder as the note')
-          .addOption('subfolder', 'In subfolder under the note')
-          .addOption('specified', 'In the folder specified below')
+          .addOption('vault', 'Vault Folder')
+          .addOption('same', 'Same Folder as the Note')
+          .addOption('subfolder', 'In Subfolder under the Note')
+          .addOption('specified', 'In the Folder Specified Below')
           .setValue(s.mediaLocationMode || 'subfolder')
           .onChange(async (v) => {
             s.mediaLocationMode = v;
@@ -2524,7 +2553,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
     if (s.mediaLocationMode === 'subfolder') {
       new Setting(containerEl)
-        .setName('Media subfolder name')
+        .setName('Media Subfolder Name')
         .addText((t) =>
           t.setValue(s.mediaSubfolder).onChange(async (v) => {
             s.mediaSubfolder = v.trim() || 'Materials';
@@ -2535,7 +2564,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
     if (s.mediaLocationMode === 'specified') {
       new Setting(containerEl)
-        .setName('Media folder')
+        .setName('Media Folder')
         .setDesc('Vault-relative, or an absolute path outside the vault.')
         .addText((t) =>
           t.setValue(s.mediaFolder).onChange(async (v) => {
@@ -2546,7 +2575,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName('Videos outside the vault')
+      .setName('Videos Outside the Vault')
       .setDesc(
         'An absolute folder on another drive, e.g. /Volumes/4T-HDD/Media. When set, a downloaded video goes there instead, ' +
           'under this vault\'s name and the same folders it would have had in the vault; subtitles and audio stay in the vault. ' +
@@ -2564,9 +2593,9 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Keep videos in the vault in these folders')
+      .setName('Keep Videos in the Vault in These Folders')
       .setDesc(
-        'Vault folders, one per line, whose videos stay in the vault even when Videos outside the vault is set: ' +
+        'Vault folders, one per line, whose videos stay in the vault even when Videos Outside the Vault is set: ' +
           'the sensitive ones, like Temp Videos. Their default in the download popup and for the commands is the vault. ' +
           'ARCH After Clipping has the same setting; keep the two the same.'
       )
@@ -2581,14 +2610,14 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Video quality')
+      .setName('Video Quality')
       .setDesc('The best stream at or under this size is merged with the best audio. A video that only exists at a lower size is downloaded as is.')
       .addDropdown((d) => {
-        d.addOption('0', 'Best available');
-        d.addOption('2160', '4K or less');
-        d.addOption('1440', '1440p or less');
-        d.addOption('1080', '1080p or less');
-        d.addOption('720', '720p or less');
+        d.addOption('0', 'Best Available');
+        d.addOption('2160', '4K or Less');
+        d.addOption('1440', '1440p or Less');
+        d.addOption('1080', '1080p or Less');
+        d.addOption('720', '720p or Less');
         d.setValue(String(s.maxHeight || 0)).onChange(async (v) => {
           s.maxHeight = Number(v);
           await this.save();
@@ -2596,7 +2625,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName('Audio format')
+      .setName('Audio Format')
       .addDropdown((d) =>
         d
           .addOption('mp3', 'mp3')
@@ -2611,7 +2640,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Download subtitles with the video')
+      .setName('Download Subtitles with the Video')
       .setDesc('Uses the subtitle languages set above. Saved beside the video as .vtt.')
       .addToggle((t) =>
         t.setValue(s.downloadSubtitles).onChange(async (v) => {
@@ -2621,7 +2650,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Keep only the best subtitle')
+      .setName('Keep Only the Best Subtitle')
       .setDesc('yt-dlp fetches every track matching the language pattern. This removes the extras, keeping the original track where there is one.')
       .addToggle((t) =>
         t.setValue(s.keepOneSubtitle).onChange(async (v) => {
@@ -2631,7 +2660,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Ask what to download')
+      .setName('Ask What to Download')
       .setDesc('Off means always use the default choice without a prompt.')
       .addToggle((t) =>
         t.setValue(s.askDownloadMode).onChange(async (v) => {
@@ -2643,7 +2672,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
     if (!s.askDownloadMode) {
       new Setting(containerEl)
-        .setName('Default choice')
+        .setName('Default Choice')
         .addDropdown((d) =>
           d
             .addOption('video_and_audio', 'Video + Audio')
@@ -2659,7 +2688,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName('Archive root')
+      .setName('Archive Root')
       .setDesc('Playlist notes go here; each playlist gets a folder beside its note.')
       .addText((t) =>
         t.setValue(s.archiveRoot).onChange(async (v) => {
@@ -2679,7 +2708,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Include transcripts when fetching details')
+      .setName('Include Transcripts When Fetching Details')
       .setDesc('Applies to the per-note "Fetch details" command, not to syncing. Syncing never downloads subtitles.')
       .addToggle((t) =>
         t.setValue(s.transcript).onChange(async (v) => {
@@ -2689,7 +2718,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Download thumbnails')
+      .setName('Download Thumbnails')
       .setDesc('Saves each video\u2019s thumbnail into the vault and points the img property at it.')
       .addToggle((t) =>
         t.setValue(s.downloadThumbnails).onChange(async (v) => {
@@ -2701,15 +2730,15 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
     if (s.downloadThumbnails) {
       new Setting(containerEl)
-        .setName('Thumbnail location')
+        .setName('Thumbnail Location')
         .setDesc('Same choices as Obsidian\'s own attachment setting.')
         .addDropdown((d) =>
           d
-            .addOption('obsidian', 'Follow Obsidian\'s attachment setting')
-            .addOption('vault', 'Vault folder')
-            .addOption('same', 'Same folder as the note')
-            .addOption('subfolder', 'In subfolder under the note')
-            .addOption('specified', 'In the folder specified below')
+            .addOption('obsidian', 'Follow Obsidian\'s Attachment Setting')
+            .addOption('vault', 'Vault Folder')
+            .addOption('same', 'Same Folder as the Note')
+            .addOption('subfolder', 'In Subfolder under the Note')
+            .addOption('specified', 'In the Folder Specified Below')
             .setValue(s.thumbnailLocationMode || 'subfolder')
             .onChange(async (v) => {
               s.thumbnailLocationMode = v;
@@ -2720,7 +2749,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
       if (s.thumbnailLocationMode === 'subfolder') {
         new Setting(containerEl)
-          .setName('Thumbnail subfolder name')
+          .setName('Thumbnail Subfolder Name')
           .addText((t) =>
             t.setValue(s.thumbnailSubfolder).onChange(async (v) => {
               s.thumbnailSubfolder = v.trim() || 'Materials';
@@ -2731,7 +2760,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
       if (s.thumbnailLocationMode === 'specified') {
         new Setting(containerEl)
-          .setName('Thumbnail folder')
+          .setName('Thumbnail Folder')
           .setDesc('Path from the vault root.')
           .addText((t) =>
             t.setValue(s.thumbnailFolder).onChange(async (v) => {
@@ -2743,7 +2772,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName('Subtitle languages')
+      .setName('Subtitle Languages')
       .setDesc('yt-dlp filter. "en.*" takes English including auto-generated.')
       .addText((t) =>
         t.setValue(s.subtitleLangs).onChange(async (v) => {
@@ -2753,7 +2782,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Note name')
+      .setName('Note Name')
       .setDesc('Placeholders: {{channel}} and {{title}}. Notes are created with this name, so nothing is renamed afterwards.')
       .addText((t) =>
         t.setValue(s.noteNameTemplate).onChange(async (v) => {
@@ -2763,7 +2792,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Fill publish dates after a sync')
+      .setName('Fill Publish Dates after a Sync')
       .setDesc(
         'The upload date is not in the fast listing a sync uses, so it is fetched once the ' +
           'notes exist. Skipped entirely when every note already has one, so re-syncing costs ' +
@@ -2777,7 +2806,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Playlist note name')
+      .setName('Playlist Note Name')
       .setDesc(
         'Placeholders: {{channel}} is the playlist owner, {{title}} its title. A per-source ' +
           'playlist note name overrides this. Changing it does not rename playlist notes you ' +
@@ -2791,7 +2820,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Pause that starts a new paragraph')
+      .setName('Pause That Starts a New Paragraph')
       .setDesc('Seconds of silence. Auto-captions have no punctuation, so a gap in the timing is the only clue a sentence ended.')
       .addText((t) =>
         t.setValue(String(s.transcriptGapSeconds)).onChange(async (v) => {
@@ -2802,7 +2831,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Longest paragraph')
+      .setName('Longest Paragraph')
       .setDesc('Seconds. A safety cap for speakers who never pause. 0 writes one unbroken block.')
       .addText((t) =>
         t.setValue(String(s.transcriptParagraphSeconds)).onChange(async (v) => {
@@ -2813,7 +2842,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Description limit')
+      .setName('Description Limit')
       .setDesc('Max lines kept after promo blocks and timestamp lists are stripped.')
       .addText((t) =>
         t.setValue(String(s.descriptionMaxLines)).onChange(async (v) => {
@@ -2826,10 +2855,10 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('yt-dlp').setHeading();
 
     new Setting(containerEl)
-      .setName('Set up external tools')
+      .setName('Set Up External Tools')
       .setDesc('Finds yt-dlp, ffmpeg, a JavaScript runtime and your browsers, fills the fields in, and offers to install what is missing.')
       .addButton((b) =>
-        b.setButtonText('Open setup').setCta().onClick(async () => {
+        b.setButtonText('Open Setup').setCta().onClick(async () => {
           await this.plugin.setup();
           this.display();
         })
@@ -2842,7 +2871,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('yt-dlp path')
+      .setName('yt-dlp Path')
       .addText((t) =>
         t.setValue(s.ytDlpPath).onChange(async (v) => {
           s.ytDlpPath = v.trim() || 'yt-dlp';
@@ -2851,7 +2880,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('ffmpeg folder')
+      .setName('ffmpeg Folder')
       .addText((t) =>
         t.setValue(s.ffmpegLocation).onChange(async (v) => {
           s.ffmpegLocation = v.trim();
@@ -2860,7 +2889,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Cookies from browser')
+      .setName('Cookies from Browser')
       .setDesc('Needed for Watch Later, Liked and private playlists.')
       .addText((t) =>
         t.setValue(s.cookiesFromBrowser).onChange(async (v) => {
@@ -2870,7 +2899,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Cookies file')
+      .setName('Cookies File')
       .setDesc('Overrides the browser setting when set.')
       .addText((t) =>
         t.setValue(s.cookiesFile).onChange(async (v) => {
@@ -2880,7 +2909,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('JavaScript runtime')
+      .setName('JavaScript Runtime')
       .setDesc('Leave blank to let yt-dlp find one.')
       .addText((t) =>
         t.setValue(s.jsRuntime).setPlaceholder('auto').onChange(async (v) => {
@@ -2890,7 +2919,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Extra yt-dlp arguments')
+      .setName('Extra yt-dlp Arguments')
       .addText((t) =>
         t.setValue(s.ytDlpExtraArgs).onChange(async (v) => {
           s.ytDlpExtraArgs = v.trim();

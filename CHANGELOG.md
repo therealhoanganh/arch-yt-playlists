@@ -3,7 +3,24 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.8.1 — current
+## 1.8.2 — current
+
+- **Title Case in every label**, from the web-design-guidelines review of 2026-09-27 (`~/Documents/ARCH UI Review.md`), whose whole list he approved: *"Yes, proceed on."* Commands, setting names and headings, buttons, popup titles and dropdown choices, Chicago style (small words such as *for*, *the*, *before* stay lower case), as in ARCH Images Plus 0.7.6. His preference: *"Actually, I much prefer Title Case."* Descriptions and notices stay sentences, and the ones that name a command or setting use its new name. A hotkey set on a command survives, because Obsidian stores hotkeys by the command's id.
+- **The download popup matches After Clipping's**, which asks the same question and was the
+  fuller one: the title *Download This Media?* (it was *Download media*, drawn as a heading
+  inside the popup), the line explaining the four choices, the same wording on the remember
+  box, and Enter picks *Video + Audio* as there. The review found the two differing in title,
+  layout and wording, and only After Clipping's answering Enter. *Save the video:* is tied to
+  its dropdown, the same edit as After Clipping 1.18.2, so `renderPlaceChoice` is still word
+  for word the same in both.
+- Three notices about copying settings from After Clipping called it "Clip Archiver", its
+  old name.
+- *External Tools* shows ● all right, ▲ worth a look, ○ missing, with the word as a tooltip;
+  "all right" and "worth a look" were the same dot in two colours.
+- The *Sync a Playlist or Channel* box has a name besides its grey hint.
+- "…" instead of "..." in progress notices, a count and its word ("3 videos") instead of "video(s)", and no spell-check underlines in the settings, whose fields hold paths, commands and patterns, not prose (turned off as each field gets focus, which is when Chromium draws them).
+
+## 1.8.1
 
 - **Media Extended library notes go in `_/media-lib`, not `media-lib` at the vault's
   root.** One note is written per video saved on the drive (1.8.0), and there were
