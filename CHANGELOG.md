@@ -3,7 +3,16 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.8.3 — current
+## 1.8.4 — current
+
+- **The setup's Cookies row checks for a YouTube login and says what it means.** His words, 2026-09-27, after the PC's missing X login was explained only in the chat: *"You need to explicitly tell this in the setup, so future me can know what's went wrong. And apply this explicit telling in other plugin too."* It
+  marked any picked browser green, with no test at all. Now it runs the same login check as
+  After Clipping 1.18.4 (`testYouTubeLogin`, the same method) and says what is wrong, what
+  fails because of it (Watch Later, Liked and private playlists cannot be synced,
+  age-restricted and members-only videos fail, "Sign in to confirm you're not a bot"), and
+  how to fix it and see that it worked, with a *Test* button.
+
+## 1.8.3
 
 - **The channel list is one card and a popup.** After the Title Case releases he asked: *"Did you work on UI of the plugins like button structures or something? Like in Arch YT Playlist, the toggle list to paste youtube channel links in is quite ugly."* The review had used a checklist (wording, keyboard, focus) that never judged layout. Shown three layouts, he chose a *Manage…* button opening a popup, the way Obsidian's own *Excluded files* setting works, and chose it for every list of that kind. The card holds the count ("4 channels,
   1 line not a channel"), the explanation that was a loose paragraph above the list, and
