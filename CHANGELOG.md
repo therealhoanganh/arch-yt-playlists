@@ -3,7 +3,11 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.8.4 — current
+## 1.8.5 — current
+
+- The setup popup's box heading reads *Filled In for You*: the Title Case pass read only labels set through Obsidian's own calls, and this one is plain text (found in the check before a compact, 2026-09-27; "in" is capitalized as the particle of *fill in*).
+
+## 1.8.4
 
 - **The setup's Cookies row checks for a YouTube login and says what it means.** His words, 2026-09-27, after the PC's missing X login was explained only in the chat: *"You need to explicitly tell this in the setup, so future me can know what's went wrong. And apply this explicit telling in other plugin too."* It
   marked any picked browser green, with no test at all. Now it runs the same login check as
