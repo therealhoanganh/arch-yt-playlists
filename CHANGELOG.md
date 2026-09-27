@@ -3,7 +3,20 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.8.2 — current
+## 1.8.3 — current
+
+- **The channel list is one card and a popup.** After the Title Case releases he asked: *"Did you work on UI of the plugins like button structures or something? Like in Arch YT Playlist, the toggle list to paste youtube channel links in is quite ugly."* The review had used a checklist (wording, keyboard, focus) that never judged layout. Shown three layouts, he chose a *Manage…* button opening a popup, the way Obsidian's own *Excluded files* setting works, and chose it for every list of that kind. The card holds the count ("4 channels,
+  1 line not a channel"), the explanation that was a loose paragraph above the list, and
+  *Manage…* and *Sync Now* beside them; the list itself is edited in the popup. It was a
+  paragraph, the browser's bare ▼ *Show the list*, a twelve-line box, and *Sync Channels
+  Now* alone in an empty card below. The popup (`ListModal`, the same class in YT Playlists, X Twitter, After Clipping and Browser History) has a large box, a live count as you type, and *Cancel* and *Save*; only *Cancel* throws an edit away, since a long paste lost to Escape is worse than a save not asked for. Tried in TESTFIELD: the count, Cancel leaving the list alone, and Escape keeping an edit.
+- **The Playlists section the same way**: its explanation and *Add Source* / *Sync All*
+  share one card (*Playlist Sources*), instead of a loose paragraph above the rows and a
+  card holding only the buttons below them. A source row is named after its playlist note
+  rather than "Source 1", and its two boxes are named by tooltips.
+- `channelListOpen`, which remembered whether the old list was open, is gone.
+
+## 1.8.2
 
 - **Title Case in every label**, from the web-design-guidelines review of 2026-09-27 (`~/Documents/ARCH UI Review.md`), whose whole list he approved: *"Yes, proceed on."* Commands, setting names and headings, buttons, popup titles and dropdown choices, Chicago style (small words such as *for*, *the*, *before* stay lower case), as in ARCH Images Plus 0.7.6. His preference: *"Actually, I much prefer Title Case."* Descriptions and notices stay sentences, and the ones that name a command or setting use its new name. A hotkey set on a command survives, because Obsidian stores hotkeys by the command's id.
 - **The download popup matches After Clipping's**, which asks the same question and was the

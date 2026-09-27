@@ -136,8 +136,8 @@ playlists while living in one folder, and links survive a rename.
 ## Channel notes
 
 `syncChannels` is the equivalent of ARCH X Twitter's bulk list, and it is
-shaped the same way on purpose: a textarea of addresses in settings rather than
-rows, a note per channel named after the channel, icon and banner as aliased
+shaped the same way on purpose: a list of addresses edited as text rather than
+rows (in a popup behind *Manage…* since 1.8.3, `ListModal`, the same class as X Twitter's), a note per channel named after the channel, icon and banner as aliased
 wikilinks, hand-added properties carried across. Read that plugin's
 `writeProfileNote` before changing this one; they should stay recognisably the
 same feature.

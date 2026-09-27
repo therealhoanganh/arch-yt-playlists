@@ -67,7 +67,6 @@ const DEFAULT_SETTINGS = {
   // the way ARCH X Twitter keeps its bulk list: rows per channel would make
   // the tab unusable at a hundred channels.
   channelList: '',
-  channelListOpen: false,
   channelTags: ['yt-channel'],
   channelNoteOrder: 'url, icon, banner, tags',
   channelLocationMode: 'specified', // vault | root | subfolder | specified
@@ -658,12 +657,13 @@ module.exports = class YouTubeArchiver extends Plugin {
   // The list as typed, reduced to yt-dlp addresses. Lines that are not a
   // channel are reported rather than silently dropped: a watch URL pasted here
   // by mistake should say so in the log.
-  channelTargets() {
+  // The list in settings, or the text given (the Manage popup counts as you type).
+  channelTargets(text = this.settings.channelList) {
     const { channelUrlFromInput } = this.lib();
     const seen = new Set();
     const targets = [];
     const rejected = [];
-    for (const line of String(this.settings.channelList || '').split('\n')) {
+    for (const line of String(text || '').split('\n')) {
       const raw = line.trim();
       if (!raw || raw.startsWith('#')) continue;
       const url = channelUrlFromInput(raw);
@@ -2043,6 +2043,55 @@ module.exports = class YouTubeArchiver extends Plugin {
 // "1 video", "3 videos": a count and its word, never "video(s)".
 function plural(n, word) { return `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`; }
 
+// The popup behind a long list's Manage… button, the same class in ARCH YT
+// Playlists, X Twitter, After Clipping and Browser History (change all together). He chose it on 2026-09-27
+// for every long list, the way Obsidian's own Excluded Files setting works: the
+// settings tab shows one card with the count, and the list is edited here, in a
+// box big enough to paste into. Only Cancel throws an edit away; Escape or the ✕
+// keep it, since a long paste lost to one key is worse than a save not asked for.
+class ListModal extends Modal {
+  constructor(app, { title, hint, value, placeholder, count, onSave }) {
+    super(app);
+    Object.assign(this, { title, hint, value, placeholder, count, onSave });
+    this.done = false;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    this.titleEl.setText(this.title);
+    this.modalEl.style.width = 'min(720px, 92vw)';
+    if (this.hint) contentEl.createEl('p', { text: this.hint, cls: 'setting-item-description', attr: { style: 'margin-top:0;' } });
+    const ta = contentEl.createEl('textarea', {
+      attr: {
+        spellcheck: 'false',
+        'aria-label': this.title,
+        placeholder: this.placeholder || '',
+        style: 'width:100%; height:45vh; resize:vertical; font-family:var(--font-monospace); font-size:var(--font-ui-small); line-height:1.6;',
+      },
+    });
+    ta.value = this.value;
+    this.ta = ta;
+    const foot = contentEl.createDiv({ attr: { style: 'display:flex; align-items:center; gap:8px; margin-top:12px;' } });
+    const status = foot.createSpan({ cls: 'setting-item-description', attr: { style: 'flex:1; font-variant-numeric:tabular-nums;', 'aria-live': 'polite' } });
+    const update = () => status.setText(this.count(ta.value));
+    update();
+    ta.addEventListener('input', update);
+    const cancel = foot.createEl('button', { text: 'Cancel' });
+    cancel.onclick = () => { this.done = true; this.close(); };
+    const save = foot.createEl('button', { text: 'Save', cls: 'mod-cta' });
+    save.onclick = async () => { this.done = true; this.close(); await this.onSave(ta.value); };
+    // After Obsidian's own focus on the first button: the cursor goes to the end of the list.
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
+  }
+
+  onClose() {
+    if (!this.done && this.ta && this.ta.value !== this.value) {
+      this.onSave(this.ta.value).then(() => new Notice(`${this.title}: saved.`));
+    }
+    this.contentEl.empty();
+  }
+}
+
 class SetupModal extends Modal {
   constructor(app, plugin, report, filled) {
     super(app);
@@ -2273,19 +2322,32 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
     new Setting(containerEl).setName('Playlists').setHeading();
 
+    // The explanation and the section's two buttons share one card (2026-09-27): they
+    // were a loose paragraph above the rows and a card holding only the buttons below.
+    new Setting(containerEl)
+      .setName('Playlist Sources')
+      .setDesc(
+        'Each source is a target, a playlist URL, a playlist id, or a shortcut (Watch Later, Liked, History, ' +
+          'Subscriptions), and the name of the playlist note its videos link to. Topics are written once when a ' +
+          'note is created \u2014 later syncs never overwrite them, so hand-sorting survives. A video in several ' +
+          'playlists gets all of them in yt-playlist.'
+      )
+      .addButton((b) =>
+        b.setButtonText('Add Source').onClick(async () => {
+          s.sources.push({ target: '', note: '' });
+          await this.save();
+          renderSources();
+        })
+      )
+      .addButton((b) => b.setButtonText('Sync All').setCta().onClick(() => this.plugin.syncAll()));
+
     const srcBox = containerEl.createDiv();
     const renderSources = () => {
       srcBox.empty();
-      srcBox.createEl('p', {
-        text:
-          'Target is a playlist URL, a playlist id, or a shortcut: Watch Later, Liked, History, ' +
-          'Subscriptions. The second field is the playlist note name that videos link to. ' +
-          'Topics are written once when a note is created \u2014 later syncs never overwrite them, ' +
-          'so hand-sorting survives. A video in several playlists gets all of them in yt-playlist.',
-        attr: { style: 'font-size:var(--font-ui-smaller); opacity:.75;' },
-      });
       s.sources.forEach((src, i) => {
-        const row = new Setting(srcBox).setName(`Source ${i + 1}`);
+        const row = new Setting(srcBox)
+          .setName(src.note || src.target || `Source ${i + 1}`)
+          .setDesc('Target, then the playlist note');
         row.addText((t) =>
           t.setPlaceholder('Watch Later').setValue(src.target || '').onChange(async (v) => {
             src.target = v.trim();
@@ -2298,6 +2360,12 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
             await this.save();
           })
         );
+        // The grey hints go once a box is filled, so each box keeps its name as a tooltip.
+        const labels = ['Target', 'Playlist note name'];
+        row.controlEl.querySelectorAll('input').forEach((el, k) => {
+          el.title = labels[k];
+          el.setAttribute('aria-label', labels[k]);
+        });
         row.addExtraButton((b) =>
           b.setIcon('refresh-cw').setTooltip('Sync this source only').onClick(() => {
             if (!src.target) return this.plugin.toast('Fill in the target first.');
@@ -2312,58 +2380,45 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
           })
         );
       });
-      new Setting(srcBox)
-        .addButton((b) =>
-          b.setButtonText('Add Source').onClick(async () => {
-            s.sources.push({ target: '', note: '' });
-            await this.save();
-            renderSources();
-          })
-        )
-        .addButton((b) => b.setButtonText('Sync All').setCta().onClick(() => this.plugin.syncAll()));
     };
     renderSources();
 
     /* ---- channels ---- */
     new Setting(containerEl).setName('Channels').setHeading();
 
-    const { targets: channelTargets, rejected: channelRejected } = this.plugin.channelTargets();
-    containerEl.createEl('p', {
-      text:
-        'One channel per line: @handle or any channel URL. Lines starting with # are ignored, so you can keep notes in here. ' +
-        'Each channel becomes one note named after the channel, with its icon and banner, so the channel property on ' +
-        'video notes links to it. Re-syncing keeps anything you added to the note by hand.',
-      attr: { style: 'font-size:var(--font-ui-smaller); opacity:.75;' },
-    });
-
-    // Hundreds of rows is what made X Twitter's tab unusable, so the list is
-    // one textarea behind a disclosure that remembers whether it was open.
-    const details = containerEl.createEl('details');
-    details.open = !!s.channelListOpen;
-    const summaryText = channelTargets.length
-      ? `Show the list (${channelTargets.length} channel${channelTargets.length === 1 ? '' : 's'}` +
-        (channelRejected.length ? `, ${channelRejected.length} line${channelRejected.length === 1 ? '' : 's'} not a channel)` : ')')
-      : 'Show the list (empty)';
-    details.createEl('summary', { text: summaryText });
-    details.addEventListener('toggle', async () => { s.channelListOpen = details.open; await this.save(); });
-    const ta = details.createEl('textarea');
-    ta.value = s.channelList || '';
-    ta.rows = 12;
-    ta.spellcheck = false;
-    ta.placeholder = '@StarTalk\nhttps://www.youtube.com/@aiDotEngineer';
-    ta.style.width = '100%';
-    ta.style.fontFamily = 'var(--font-monospace)';
-    let typing = null;
-    ta.addEventListener('input', () => {
-      // Debounced: saving on every keystroke of a long list is pointless work,
-      // and re-rendering the tab mid-edit would steal focus.
-      clearTimeout(typing);
-      typing = setTimeout(async () => { s.channelList = ta.value; await this.save(); }, 400);
-    });
-    ta.addEventListener('blur', async () => { s.channelList = ta.value; await this.save(); this.display(); });
-
+    // One card with the count, the explanation and the buttons; the list itself is
+    // edited in a popup (ListModal). It was a loose paragraph, a bare <details> and a
+    // twelve-line box, with Sync alone in an empty card below: his words, 2026-09-27,
+    // "the toggle list to paste youtube channel links in is quite ugly".
+    const countChannels = (text) => {
+      const { targets, rejected } = this.plugin.channelTargets(text);
+      const n = targets.length ? `${targets.length} channel${targets.length === 1 ? '' : 's'}` : 'No channels yet';
+      return rejected.length ? `${n}, ${rejected.length} line${rejected.length === 1 ? '' : 's'} not a channel` : n;
+    };
     new Setting(containerEl)
-      .addButton((b) => b.setButtonText('Sync Channels Now').setCta().onClick(() => this.plugin.syncChannels()));
+      .setName('Channel List')
+      .setDesc(
+        `${countChannels(s.channelList)}. One per line: @handle or any channel URL; a line starting with # is a note ` +
+          'to yourself. Each channel becomes one note named after the channel, with its icon and banner, so the ' +
+          'channel property on video notes links to it. Re-syncing keeps anything you added to the note by hand.'
+      )
+      .addButton((b) =>
+        b.setButtonText('Manage\u2026').onClick(() =>
+          new ListModal(this.app, {
+            title: 'Channel List',
+            hint: 'One per line: @handle or any channel URL. A line starting with # is a note to yourself.',
+            value: s.channelList || '',
+            placeholder: '@StarTalk\nhttps://www.youtube.com/@aiDotEngineer',
+            count: countChannels,
+            onSave: async (v) => {
+              s.channelList = v;
+              await this.save();
+              this.display();
+            },
+          }).open()
+        )
+      )
+      .addButton((b) => b.setButtonText('Sync Now').setCta().onClick(() => this.plugin.syncChannels()));
 
     new Setting(containerEl)
       .setName('Channel Note Location')
@@ -2709,7 +2764,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Include Transcripts When Fetching Details')
-      .setDesc('Applies to the per-note "Fetch details" command, not to syncing. Syncing never downloads subtitles.')
+      .setDesc('Applies to the "Fetch Details and Transcript for This Note" command, not to syncing. Syncing never downloads subtitles.')
       .addToggle((t) =>
         t.setValue(s.transcript).onChange(async (v) => {
           s.transcript = v;
