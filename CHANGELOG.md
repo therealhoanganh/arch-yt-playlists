@@ -3,7 +3,15 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.9.1 — current
+## 1.9.2 — current
+
+Found while downloading the protected Watch Later videos on the PC, 2026-09-28, with 4T-HDD plugged in there.
+
+- **An extra subtitle language is fetched as its `-orig` track only** (`vi-orig`, not `vi`). Plain `vi` on an English video asks YouTube for a machine translation, which it throttles: the first PC download failed outright on `HTTP Error 429` for `vi`. `-orig` exists only for the spoken language, so no translation is requested. A hand-made Vietnamese track is no longer fetched.
+- **`--ignore-errors` on every call that fetches subtitles**: `hydrate`, `hydrateOne`, `runMedia` and the subtitles-only download. A refused track is a warning, and the video and its other tracks are still saved.
+- **`driveOf` reads `/Volumes/<name>` on any platform.** It was macOS-only, so on the PC, which reaches 4T-HDD through the same `/Volumes/4T-HDD` link, the drive name came out empty and the body link read ": file.webm". Same fix in After Clipping 1.19.1.
+
+## 1.9.1
 
 - **Transcripts are written at all.** The details pass ran yt-dlp with `--dump-json`, which implies `--simulate`, and a simulated run writes no subtitle files, so `readTranscript` always found nothing: 0 of 55 notes synced into Psycho-history and iCanStudy had a transcript. `--no-simulate` is added whenever a transcript is wanted (`hydrate` and `hydrateOne`); `--skip-download` still keeps the video from being fetched. Found on 2026-09-28 while writing the Watch Later notes. Notes synced before this have no transcript until they are filled again (*Fetch Details and Transcript for This Note*).
 

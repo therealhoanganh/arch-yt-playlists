@@ -71,17 +71,23 @@ knowable before downloading, and there is no native yt-dlp selector for "the bes
 one"; it is an open problem upstream. So the extras are pruned afterwards.
 
 **Since 1.9.0 an extra language rides along (`alsoSubtitleLangs`, default `vi`),
-kept only when the video is spoken in it.** His request, 2026-09-28. YouTube offers
-an auto-translation into almost any language, so asking for `vi` brings a machine
-Vietnamese track on English videos too. The tell is `-orig`: YouTube writes
-`<lang>-orig` only for the language its speech recognition heard (checked: English
-video `en, en-orig, vi`; Vietnamese video `en, vi, vi-orig`). The transcript follows
-the spoken language when it is the main or an extra one. All of it is
-`lib/subtitles.js`, copied word for word into After Clipping; change them together.
+kept only when the video is spoken in it.** His request, 2026-09-28. The tell is
+`-orig`: YouTube writes `<lang>-orig` only for the language its speech recognition
+heard (checked: English video `en, en-orig, vi`; Vietnamese video `en, vi, vi-orig`).
+**Since 1.9.2 only `vi-orig` is asked for, never plain `vi`**: plain `vi` on an English
+video is a machine translation, YouTube throttles those, and the first download on the
+PC failed on `HTTP Error 429` for `vi`. The transcript follows the spoken language when
+it is the main or an extra one. All of it is `lib/subtitles.js`, copied word for word
+into After Clipping; change them together.
+
+**`--ignore-errors` goes with every call that fetches subtitles (1.9.2)**, so a track
+YouTube refuses is a warning and the video still downloads, with its other tracks. The
+main pattern `en.*` still fetches a translated `en` on a non-English video, which can
+429; that now costs only that track. A video that fails still exits non-zero.
 
 The known weaknesses: ranking is by language code, which cannot tell a
-creator-written track from an auto-generated one, and a hand-made Vietnamese track on
-an English video is dropped with the auto-translation. Querying `--dump-json` first
+creator-written track from an auto-generated one, and a hand-made Vietnamese track is
+never fetched (it would mean asking for plain `vi`). Querying `--dump-json` first
 would fix both, at the cost of an extra call per video. It was considered and
 declined. Do not tighten `--sub-langs` to plain `en` as a shortcut — YouTube tags
 auto-captions with a region or `-orig`, so the plain form quietly gets nothing.
@@ -224,7 +230,10 @@ Do not "simplify" this to an existence check. Unplugged is not gone, and treatin
 as gone downloads a whole playlist again into the vault. A download to an unplugged
 drive is refused, and the folder is never created. A drive is plugged in when
 `/Volumes/<name>` has a different device number from `/Volumes`, because an empty
-folder of that name can sit on the Mac's own disk.
+folder of that name can sit on the Mac's own disk. **`driveOf` reads `/Volumes/<name>` on
+any platform since 1.9.2**: the PC reaches the drive through the same `/Volumes/4T-HDD`
+link, and the macOS-only check gave an empty drive name there, so the body link read
+": file.webm".
 
 **Playback depends on Media Extended, tested on 4.2.1 only.** Hoang Anh keeps 4.2.1 on
 purpose (*"4.2.5 were bugged from my experience using it"*), frozen through BRAT in

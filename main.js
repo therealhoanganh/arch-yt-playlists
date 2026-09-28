@@ -7,11 +7,13 @@ const fs = require('fs');
 const os = require('os');
 const { pathToFileURL, fileURLToPath } = require('url');
 
-// The drive a folder outside the vault lives on. On macOS that is
-// /Volumes/<name>; elsewhere the path's root.
+// The drive a folder outside the vault lives on: /Volumes/<name>, on the Mac
+// and on the PC through its link; elsewhere the path's root.
 function driveOf(p) {
   const parts = String(p).split(path.sep);
-  if (process.platform === 'darwin' && parts[1] === 'Volumes' && parts[2]) {
+  // Any platform: the PC reaches the drive through the same /Volumes/<name>
+  // link (Backup Strategy, Part 2), so its name must come out the same there.
+  if (parts[1] === 'Volumes' && parts[2]) {
     return path.join('/', 'Volumes', parts[2]);
   }
   return path.parse(String(p)).root;
@@ -1402,7 +1404,7 @@ module.exports = class YouTubeArchiver extends Plugin {
         const out = path.join(folder, `${stem}.%(ext)s`);
         const r = await this.runYtDlp(
           [
-            '--no-playlist', '--remote-components', 'ejs:github', '--skip-download',
+            '--no-playlist', '--remote-components', 'ejs:github', '--skip-download', '--ignore-errors',
             '--write-auto-subs', '--write-subs',
             '--sub-langs', this.lib().subtitles.subLangsArg(this.settings),
             '--sub-format', 'vtt/best',
@@ -1491,7 +1493,9 @@ module.exports = class YouTubeArchiver extends Plugin {
   // --remote-components is added here, not in buildFlags: enumeration has no
   // challenge to solve, so making every sync fetch the solver would be waste.
   async runMedia(args, url, folder, stem) {
-    const full = ['--no-playlist', '--remote-components', 'ejs:github', ...args];
+    // --ignore-errors: a subtitle YouTube refuses (HTTP 429) is a warning, not a
+    // failed download. A video that fails still exits non-zero, which is checked.
+    const full = ['--no-playlist', '--remote-components', 'ejs:github', '--ignore-errors', ...args];
     const printFile = path.join(os.tmpdir(), `arch-yt-${Date.now()}.txt`);
     const res = await this.runYtDlp(
       [...full, '--no-simulate', '--print-to-file', 'after_move:filepath', printFile, url],
