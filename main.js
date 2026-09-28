@@ -88,13 +88,17 @@ const DEFAULT_SETTINGS = {
   thumbnailSubfolder: 'Materials',
   thumbnailFolder: 'YouTube/Images',
   subtitleLangs: 'en.*',
+  // Extra languages kept when a video is spoken in them (lib/subtitles.js).
+  alsoSubtitleLangs: 'vi',
   transcriptParagraphSeconds: 25,
   transcriptGapSeconds: 1.4,
   noteNameTemplate: '{{channel}} \u2014 {{title}}',
   playlistNoteNameTemplate: '{{channel}} \u2013 {{title}}',
   fillDatesAfterSync: true,
-  descriptionMaxLines: 20,
-  descriptionMaxChars: 1200,
+  // 0 keeps the whole description (promo blocks are still stripped). The old
+  // 20 lines and 1,200 characters lost the text of videos that later vanished.
+  descriptionMaxLines: 0,
+  descriptionMaxChars: 0,
 
   // media download
   mediaLocationMode: 'specified', // vault | same | subfolder | specified
@@ -1360,7 +1364,7 @@ module.exports = class YouTubeArchiver extends Plugin {
         if (this.settings.downloadSubtitles) {
           vArgs.push(
             '--write-auto-subs', '--write-subs',
-            '--sub-langs', this.settings.subtitleLangs || 'en.*',
+            '--sub-langs', this.lib().subtitles.subLangsArg(this.settings),
             '--sub-format', 'vtt/best'
           );
           // yt-dlp takes a separate output template per file type, so the
@@ -1400,7 +1404,7 @@ module.exports = class YouTubeArchiver extends Plugin {
           [
             '--no-playlist', '--remote-components', 'ejs:github', '--skip-download',
             '--write-auto-subs', '--write-subs',
-            '--sub-langs', this.settings.subtitleLangs || 'en.*',
+            '--sub-langs', this.lib().subtitles.subLangsArg(this.settings),
             '--sub-format', 'vtt/best',
             '-o', out, url,
           ],
@@ -1415,7 +1419,7 @@ module.exports = class YouTubeArchiver extends Plugin {
         }
         if (this.settings.keepOneSubtitle) {
           const kept = this.pruneSubtitles(folder, rawStem);
-          files = kept ? [kept] : files;
+          if (kept.length) files = kept;
         }
         notice.hide();
         this.log('subtitles saved:', files.join(', '));
@@ -1544,17 +1548,18 @@ module.exports = class YouTubeArchiver extends Plugin {
       .map((n) => path.join(folder, n));
   }
 
-  // '--sub-langs en.*' matches every English variant YouTube offers -- en,
-  // en-US, en-GB, en-orig and the rest -- and yt-dlp writes all of them. The
-  // pattern stays broad so something always arrives even when there is no plain
-  // 'en' track; the surplus is removed here instead. Subtitle files are a few KB,
-  // so fetching several and keeping one is cheaper than a second request.
+  // yt-dlp writes one file per matched track: '--sub-langs en.*' alone brings
+  // en, en-US, en-orig and the rest, and the extra languages ('vi') bring an
+  // auto-translation on almost every video. The pattern stays broad so
+  // something always arrives; the surplus is removed here. What stays is the
+  // best main-language track, plus an extra language's track when the video is
+  // spoken in it (lib/subtitles.js). Returns the kept files.
   pruneSubtitles(folder, stem) {
     let entries = [];
     try {
       entries = fs.readdirSync(folder);
     } catch (_) {
-      return null;
+      return [];
     }
     const esc = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const shape = new RegExp(`^${esc}\\.([A-Za-z0-9_-]+)\\.(vtt|srt|ass)$`, 'i');
@@ -1564,12 +1569,10 @@ module.exports = class YouTubeArchiver extends Plugin {
       const m = name.match(shape);
       if (m) found.push({ name, lang: m[1], ext: m[2].toLowerCase() });
     }
-    if (found.length < 2) return found[0] ? path.join(folder, found[0].name) : null;
-
-    found.sort((a, b) => this.subtitleRank(a) - this.subtitleRank(b) || a.lang.localeCompare(b.lang));
-    const keep = found[0];
+    const { keep } = this.lib().subtitles.pickSubtitles(found, this.settings);
     let removed = 0;
-    for (const f of found.slice(1)) {
+    for (const f of found) {
+      if (keep.includes(f)) continue;
       try {
         fs.unlinkSync(path.join(folder, f.name));
         removed++;
@@ -1577,19 +1580,8 @@ module.exports = class YouTubeArchiver extends Plugin {
         /* leave it rather than fail the download over a subtitle */
       }
     }
-    this.log(`subtitles: kept ${keep.lang}, removed ${removed} other track(s)`);
-    return path.join(folder, keep.name);
-  }
-
-  // Lower sorts first. A plain language code beats a regional variant, and the
-  // original-language track beats an auto-translation of it.
-  subtitleRank(f) {
-    const lang = f.lang.toLowerCase();
-    const base = (this.settings.subtitleLangs || 'en').replace(/[.*].*$/, '').toLowerCase() || 'en';
-    if (lang === base) return 0;
-    if (lang === `${base}-orig`) return 1;
-    if (lang.startsWith(`${base}-`)) return 2;
-    return 3;
+    if (found.length > 1) this.log(`subtitles: kept ${keep.map((k) => k.lang).join(', ')}, removed ${removed} other track(s)`);
+    return keep.map((k) => path.join(folder, k.name));
   }
 
   async extractAudioFrom(videoPath, folder) {
@@ -1975,6 +1967,7 @@ module.exports = class YouTubeArchiver extends Plugin {
         'cookiesFile',
         'jsRuntime',
         'subtitleLangs',
+        'alsoSubtitleLangs',
       ]) {
         if (other[key]) {
           this.settings[key] = other[key];
@@ -2045,6 +2038,13 @@ module.exports = class YouTubeArchiver extends Plugin {
     // else in it was typed and stays.
     if (Array.isArray(saved.tags) && saved.tags.length === 1 && saved.tags[0] === 'youtube-video') {
       this.settings.tags = DEFAULT_SETTINGS.tags.slice();
+    }
+    // The description used to be cut at 20 lines and 1,200 characters. A vault
+    // still on exactly those numbers never chose them, so it moves to the new
+    // default of no limit; anything else was typed and stays.
+    if (saved.descriptionMaxLines === 20 && (saved.descriptionMaxChars === undefined || saved.descriptionMaxChars === 1200)) {
+      this.settings.descriptionMaxLines = 0;
+      this.settings.descriptionMaxChars = 0;
     }
     if (!Array.isArray(this.settings.channelTags)) this.settings.channelTags = DEFAULT_SETTINGS.channelTags.slice();
     // The video quality used to be a raw yt-dlp selector. A cap typed into it
@@ -2795,8 +2795,8 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Keep Only the Best Subtitle')
-      .setDesc('yt-dlp fetches every track matching the language pattern. This removes the extras, keeping the original track where there is one.')
+      .setName('Keep Only the Best Subtitles')
+      .setDesc('yt-dlp fetches every track matching the language patterns. This removes the extras, keeping the best track in the main language, plus one in an Also Keep language when the video is spoken in it.')
       .addToggle((t) =>
         t.setValue(s.keepOneSubtitle).onChange(async (v) => {
           s.keepOneSubtitle = v;
@@ -2927,6 +2927,20 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName('Also Keep Subtitles In')
+      .setDesc(
+        'Language codes, comma-separated. A track in one of these is kept when the video is ' +
+          'spoken in that language, and its transcript is written in it. YouTube\u2019s machine ' +
+          'translation into these languages is left out. Empty turns it off.'
+      )
+      .addText((t) =>
+        t.setValue(s.alsoSubtitleLangs || '').onChange(async (v) => {
+          s.alsoSubtitleLangs = v.trim();
+          await this.save();
+        })
+      );
+
+    new Setting(containerEl)
       .setName('Note Name')
       .setDesc('Placeholders: {{channel}} and {{title}}. Notes are created with this name, so nothing is renamed afterwards.')
       .addText((t) =>
@@ -2988,11 +3002,12 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Description Limit')
-      .setDesc('Max lines kept after promo blocks and timestamp lists are stripped.')
+      .setDesc('Max lines kept after promo blocks and timestamp lists are stripped. 0 keeps the whole description.')
       .addText((t) =>
         t.setValue(String(s.descriptionMaxLines)).onChange(async (v) => {
           const n = Number(v);
-          s.descriptionMaxLines = Number.isFinite(n) && n >= 0 ? n : 20;
+          s.descriptionMaxLines = Number.isFinite(n) && n >= 0 ? n : 0;
+          s.descriptionMaxChars = 0;
           await this.save();
         })
       );

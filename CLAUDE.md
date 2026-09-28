@@ -64,15 +64,25 @@ as failure left `dl-ed` false and re-fetched the whole file next run. The output
 folder is searched for what the template would have named, with subtitle sidecars
 excluded so a `.vtt` is never linked as the media.
 
-**Only one subtitle track is kept, and this was a considered decision.**
+**One subtitle track per language is kept, and this was a considered decision.**
 `--sub-langs en.*` matches `en`, `en-US`, `en-GB`, `en-orig` and every
 auto-translated variant — nine files on some videos. Which tracks exist is not
 knowable before downloading, and there is no native yt-dlp selector for "the best
 one"; it is an open problem upstream. So the extras are pruned afterwards.
 
-The known weakness: ranking is by language code, which cannot tell a
-creator-written track from an auto-generated one. Querying `--dump-json` first
-would fix that, at the cost of an extra call per video. It was considered and
+**Since 1.9.0 an extra language rides along (`alsoSubtitleLangs`, default `vi`),
+kept only when the video is spoken in it.** His request, 2026-09-28. YouTube offers
+an auto-translation into almost any language, so asking for `vi` brings a machine
+Vietnamese track on English videos too. The tell is `-orig`: YouTube writes
+`<lang>-orig` only for the language its speech recognition heard (checked: English
+video `en, en-orig, vi`; Vietnamese video `en, vi, vi-orig`). The transcript follows
+the spoken language when it is the main or an extra one. All of it is
+`lib/subtitles.js`, copied word for word into After Clipping; change them together.
+
+The known weaknesses: ranking is by language code, which cannot tell a
+creator-written track from an auto-generated one, and a hand-made Vietnamese track on
+an English video is dropped with the auto-translation. Querying `--dump-json` first
+would fix both, at the cost of an extra call per video. It was considered and
 declined. Do not tighten `--sub-langs` to plain `en` as a shortcut — YouTube tags
 auto-captions with a region or `-orig`, so the plain form quietly gets nothing.
 

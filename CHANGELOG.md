@@ -3,7 +3,15 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.8.5 — current
+## 1.9.0 — current
+
+Two defaults changed for the Watch Later sort of 2026-09-28, where 18 of 653 videos had already been deleted or made private and about half of those were political or Vietnamese. What a note keeps is what survives when the video goes.
+
+- **Vietnamese subtitles, when the video is in Vietnamese.** His words: *"can you make this into default setting too? Like download vietnamese subtitle if there is one."* A new setting, *Also Keep Subtitles In*, default `vi`, adds `vi,vi-orig` to `--sub-langs`. YouTube offers a machine translation into Vietnamese on almost every video, so a Vietnamese track is kept only when the video is spoken in it, which YouTube marks with a `vi-orig` track (checked on two videos from the list: an English one returned `en, en-orig, vi`, a Vietnamese one `en, vi, vi-orig`). A Vietnamese video's note then gets its transcript in Vietnamese instead of the English machine translation, and a video download keeps both `.en.vtt` and `.vi.vtt`. The rule lives in the new `lib/subtitles.js`; After Clipping 1.19.0 carries a copy.
+- **The whole description.** *Description Limit* defaults to 0, no limit (was 20 lines and 1,200 characters). Promo blocks and timestamp lists are still stripped. A vault still on exactly 20 and 1,200 moves to the new default on load; a typed limit stays.
+- `pruneSubtitles` returns every kept file rather than one.
+
+## 1.8.5
 
 - The setup popup's box heading reads *Filled In for You*: the Title Case pass read only labels set through Obsidian's own calls, and this one is plain text (found in the check before a compact, 2026-09-27; "in" is capitalized as the particle of *fill in*).
 
