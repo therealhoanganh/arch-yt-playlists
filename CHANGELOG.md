@@ -3,7 +3,11 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.9.0 — current
+## 1.9.1 — current
+
+- **Transcripts are written at all.** The details pass ran yt-dlp with `--dump-json`, which implies `--simulate`, and a simulated run writes no subtitle files, so `readTranscript` always found nothing: 0 of 55 notes synced into Psycho-history and iCanStudy had a transcript. `--no-simulate` is added whenever a transcript is wanted (`hydrate` and `hydrateOne`); `--skip-download` still keeps the video from being fetched. Found on 2026-09-28 while writing the Watch Later notes. Notes synced before this have no transcript until they are filled again (*Fetch Details and Transcript for This Note*).
+
+## 1.9.0
 
 Two defaults changed for the Watch Later sort of 2026-09-28, where 18 of 653 videos had already been deleted or made private and about half of those were political or Vietnamese. What a note keeps is what survives when the video goes.
 
