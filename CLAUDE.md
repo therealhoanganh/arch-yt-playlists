@@ -267,6 +267,24 @@ all four places, or not at all.
 Media Extended ever changes version, retest both points before trusting it. Only
 playback depends on it: the "already downloaded?" check reads the disk.
 
+## Open: a Vietnamese video kept no `vi` track (reported 2026-09-29, not fixed)
+
+His report: *"The vietnamese video didn't download .vi subtitle despite I add .en*,.vi* in setting, we will need to fix
+that later."* The video is *The Hanoi Chamomile — Mình Học Chữ Hán Và Từ Vựng Tiếng Nhật Như Thế Nào Tạo Flashcard Với
+Anki*, in iCanStudy's *Sylvie – Anki YouTube Video* playlist; only `.en.vtt` arrived, a word-timed track, so YouTube's
+translation of the Vietnamese speech track. What was found, not yet confirmed by a run:
+
+- iCanStudy's `data.json` has `subtitleLangs: "en.*,vi.*"`, so the extra language went into the **main** pattern.
+  `alsoSubtitleLangs` is unset, so its default `vi` applies, and the `--sub-langs` sent was `en.*,vi.*,vi-orig`.
+- `vi.*` asks for plain `vi` on every video, the machine translation that YouTube throttles (the 429 of 2026-09-28 in
+  `lib/subtitles.js`), so the likeliest cause is that the `vi` requests failed. The log of the run, on the computer that
+  synced the playlist, would say.
+- The likely fix is the setting: *Subtitle Languages* back to `en.*`, with `vi` in *Also Keep Subtitles In*. The plugin
+  could also refuse or warn when a second language is typed into the main pattern, since the two fields are easy to
+  confuse. Then re-sync that one video and check that `vi-orig` arrives.
+
+The video's transcript for the icanstudy skill comes from Whisper on the PC in Vietnamese regardless (`ics/src/Anki`).
+
 ## Planned: more sites than YouTube, and maybe a new name (not started)
 
 Hoang Anh, 2026-09-24, after asking how this plugin and After Clipping differ: *"there
