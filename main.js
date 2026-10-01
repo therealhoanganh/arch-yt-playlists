@@ -742,7 +742,7 @@ module.exports = class YouTubeArchiver extends Plugin {
   // own metadata -- name, handle, avatar and banner addresses -- without
   // listing a single video. Measured at about 1.5 s a channel.
   async syncChannel(target) {
-    const { channelUrlFromInput, channelFromJson, channelImageStem, safeFileName } = this.lib();
+    const { channelUrlFromInput, channelFromJson, channelImageStem, safeFileName, legacyFileName } = this.lib();
     const url = channelUrlFromInput(target) || target;
     const r = await this.runYtDlp(['--dump-single-json', '--playlist-items', '0', '--no-warnings', url], 120000);
     if (r.code !== 0 || !r.stdout.trim()) {
@@ -758,7 +758,10 @@ module.exports = class YouTubeArchiver extends Plugin {
     if (folder) await this.ensureFolder(folder);
     // Named after the channel, and nothing else: that is what makes the
     // channel: [[Name]] link every video note already carries resolve here.
-    const notePath = normalizePath(`${folder ? folder + '/' : ''}${safeFileName(ch.name)}.md`);
+    // Under the old name (a colon became a space before 1.9.3) when only that note exists.
+    const pathFor = (name) => normalizePath(`${folder ? folder + '/' : ''}${name}.md`);
+    let notePath = pathFor(safeFileName(ch.name));
+    if (!this.app.vault.getAbstractFileByPath(notePath) && this.app.vault.getAbstractFileByPath(pathFor(legacyFileName(ch.name)))) notePath = pathFor(legacyFileName(ch.name));
     const imageFolder = this.resolveChannelImageFolder(folder);
     if (imageFolder) await this.ensureFolder(imageFolder);
 
