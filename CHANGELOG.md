@@ -3,7 +3,11 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.9.3 — current
+## 1.9.4 — current
+
+- **Media Extended 4.2.7 is the tested version** (`TESTED` in `checkMediaExtended`, which the log names at startup when *Videos Outside the Vault* is set). His request, 2026-10-04: *"I want to install the latest 4.2.7 and update out plugin to it if needed."* He kept 4.2.1 because *"4.2.5 were bugged from my experience"*. That was Media Extended issue 670 (fails to load on Obsidian 1.13), fixed in 4.2.7. His check in TESTFIELD the same day: *"everything seem like before, all the clicks and hotkey work"*. 4.2.7 reads the library notes this plugin writes (`mx-uid`, `video:`, `subtitles:`) the same way, so nothing else changed. The 4T-HDD videos get one more look on 4.2.7 when the drive is plugged in.
+
+## 1.9.3
 
 - **A title's colon becomes " - " in a note's name** (`Lecture 3: Markets` is `Lecture 3 - Markets`), and a colon inside a word becomes "-". It became a space before. His rule for every ARCH plugin, 2026-10-02: *"Fix it, we need will need to find what games got ":" replace with blank space too, this need to be a universal rule too too!"* (Recreations 0.4.4 has the whole account.)
 - **Older notes keep their names.** Video notes are found by their id, so a resynced playlist never doubles them. A playlist note and its folder, and a channel note, are found by name, so each uses its old name (`legacyFileName`) when only that note exists. Nothing in the vaults was renamed.

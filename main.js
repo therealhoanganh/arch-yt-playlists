@@ -386,7 +386,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     return { place: 'drive', drive, mounted, fallback: false };
   }
 
-  // Media Extended 4.2.1 loads a video's subtitles from its library note: a
+  // Media Extended (4.2.1, and 4.2.7 since 2026-10-04) loads a video's subtitles from its library note: a
   // note with an mx-uid, `video: <file URL>` and `subtitles: ["[[<vault
   // .vtt>#lang=en]]"]`, the form its own Add resources button writes. Written
   // for a video saved on the drive, so its transcript works while the .vtt
@@ -445,13 +445,15 @@ module.exports = class YouTubeArchiver extends Plugin {
   }
 
   // Videos outside the vault are played by Media Extended, which reads the
-  // file:/// URL in `media`. That was tested on 4.2.1 only, the version Hoang
-  // Anh keeps on purpose ("4.2.5 were bugged from my experience"), so the log
+  // file:/// URL in `media`. That was tested on 4.2.1 (2026-09-24) and on 4.2.7
+  // (2026-10-04, his check in TESTFIELD: "all the clicks and hotkey work"). He
+  // keeps the version frozen on purpose: 4.2.5 failed to load on Obsidian 1.13
+  // (Media Extended issue 670, fixed in 4.2.7), so the log
   // says which version is running. Only playback depends on it: the
   // "already downloaded?" check reads the disk, not Media Extended.
   checkMediaExtended() {
     if (!String(this.settings.externalVideoFolder || '').trim()) return;
-    const TESTED = '4.2.1';
+    const TESTED = '4.2.7';
     const plugins = this.app.plugins || {};
     const mx = plugins.manifests && plugins.manifests['media-extended'];
     const on = !!(plugins.enabledPlugins && plugins.enabledPlugins.has('media-extended'));
@@ -1470,7 +1472,7 @@ module.exports = class YouTubeArchiver extends Plugin {
         ? this.app.vault.adapter.getBasePath()
         : '';
     // Outside the vault: a bare file:/// URL, the form Media Extended reads
-    // from `media` and plays in its own window (tested on 4.2.1, 2026-09-24).
+    // from `media` and plays in its own window (tested on 4.2.1, 2026-09-24, and 4.2.7, 2026-10-04).
     // A markdown [Video](file:///…) link opened in the web browser instead.
     const links = saved.map((abs) => {
       if (!base || !abs.startsWith(base + path.sep)) return pathToFileURL(abs).href;
