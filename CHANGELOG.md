@@ -3,6 +3,10 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
+## Unreleased
+
+- **`CLAUDE.md` rebuilt** (2026-10-09), in his AI rules rebuild (`~/Documents/AI Rules Rebuild Plan 2026-10-08.md`): Rules, Mistakes and Lessons, Where It Stands, one fact per line, 149 lines from 387. The old file is in `~/Documents/_/TRASH/arch-yt-playlists/`, and word for word, with every walk-through and measurement, in `~/Documents/_/AI/arch-yt-playlists/Details.md`. His word on the drafts: "they are straight forward and you can do this job well."
+
 ## 1.9.5 — current
 
 - **The track in the language a video is spoken in is always kept, whatever the language.** His words, 2026-10-09: *"we will need a permanent fix of smart rule too, like add English and Vietnamese as default or always download auto-generated"*, then, asked whether only English and Vietnamese or any language: *"Any language"*. The cause: iCanStudy's *Subtitle Languages* was `en.*,vi.*`, and `vi.*` asked YouTube for its machine translation, which it refuses, so a Vietnamese video kept only English (2026-09-29).
