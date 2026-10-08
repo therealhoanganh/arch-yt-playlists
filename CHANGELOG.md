@@ -3,7 +3,19 @@
 
 > **Numbering.** `1.0.0` is the first release meant for anyone other than its author. Everything before it was development and is numbered `0.1.0` upward in the order it happened, with no entries dropped or merged. Those versions were renumbered twice on the way here, so any number you see in an old console log or screenshot will not match this file.
 
-## 1.9.4 — current
+## 1.9.5 — current
+
+- **The track in the language a video is spoken in is always kept, whatever the language.** His words, 2026-10-09: *"we will need a permanent fix of smart rule too, like add English and Vietnamese as default or always download auto-generated"*, then, asked whether only English and Vietnamese or any language: *"Any language"*. The cause: iCanStudy's *Subtitle Languages* was `en.*,vi.*`, and `vi.*` asked YouTube for its machine translation, which it refuses, so a Vietnamese video kept only English (2026-09-29).
+  - `--sub-langs` is now the main pattern plus `.*-orig`, every track YouTube labels "Original". Never a plain second language, so no translation is asked for.
+  - The spoken language is the video's own `language` field, printed by yt-dlp (`--print-to-file video:%(language)s`). The "Original" label alone cannot tell it: the Vietnamese video `4zpeu-XTBAQ` offers both `vi-orig`, its speech, and `en-US-orig`, an English translation YouTube also labels "Original". With no `language`, a lone "-orig" track is taken as spoken.
+  - Kept: the best main-language track, plus the best track in the spoken language when it differs. *Also Keep Subtitles In* is gone; a saved value is no longer read.
+  - *Subtitle Languages* holds one language. On load, a second one after a comma is dropped, saved and announced once (Psycho-history holds `en.*,vi*.`).
+  - Tested in TESTFIELD on 2026-10-09: an English video kept `en`; the Vietnamese one `en` and `vi-orig`; a Japanese one (`GUTCJWRrAZI`) `en` and `ja-orig`; a video with no `language` (`jNQXAC9IVRw`) `en`.
+- **A tool path saved on the other computer is passed over.** Plugin settings sync between the Mac and the PC, and each fills in its own paths. In TESTFIELD on the Mac the saved yt-dlp and ffmpeg were the PC's `/home/hoanganh/...`, so every download failed with `ENOENT`; iCanStudy and CHAOS held such a path too. A saved yt-dlp, ffmpeg or JavaScript runtime that is missing here, or is a program built for the other system (read from its first bytes), is now skipped for the one on this computer's PATH, with a log line. Nothing is saved, so the two computers never overwrite each other.
+- **`purgeModuleCache` has the fix ARCH Recreations made in its copy**: it compares real paths and walks `window.require.cache`, so an edit to `lib/` takes effect on a plugin reload in TESTFIELD. Checked the same day: the new `lib/subtitles.js` was running after one reload. Releases were never affected.
+- After Clipping 1.22.3 carries the same subtitle rule and tool-path check, word for word.
+
+## 1.9.4
 
 - **Media Extended 4.2.7 is the tested version** (`TESTED` in `checkMediaExtended`, which the log names at startup when *Videos Outside the Vault* is set). His request, 2026-10-04: *"I want to install the latest 4.2.7 and update out plugin to it if needed."* He kept 4.2.1 because *"4.2.5 were bugged from my experience"*. That was Media Extended issue 670 (fails to load on Obsidian 1.13), fixed in 4.2.7. His check in TESTFIELD the same day: *"everything seem like before, all the clicks and hotkey work"*. 4.2.7 reads the library notes this plugin writes (`mx-uid`, `video:`, `subtitles:`) the same way, so nothing else changed. The 4T-HDD videos get one more look on 4.2.7 when the drive is plugged in.
 

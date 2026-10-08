@@ -91,7 +91,6 @@ const DEFAULT_SETTINGS = {
   thumbnailFolder: 'YouTube/Images',
   subtitleLangs: 'en.*',
   // Extra languages kept when a video is spoken in them (lib/subtitles.js).
-  alsoSubtitleLangs: 'vi',
   transcriptParagraphSeconds: 25,
   transcriptGapSeconds: 1.4,
   noteNameTemplate: '{{channel}} \u2014 {{title}}',
@@ -181,6 +180,21 @@ module.exports = class YouTubeArchiver extends Plugin {
     this.purgeModuleCache();
 
     await this.loadSettings();
+    // Subtitle Languages holds one language since 2026-10-09. A second one after
+    // a comma asked YouTube for a machine translation, which it refuses (iCanStudy
+    // lost a Vietnamese track that way); the spoken language is now kept by itself.
+    // So the first entry stays, the change is saved, and it is said once.
+    {
+      const parts = String(this.settings.subtitleLangs || '').split(',').map((x) => x.trim()).filter(Boolean);
+      if (parts.length > 1) {
+        const was = this.settings.subtitleLangs;
+        this.settings.subtitleLangs = parts[0];
+        await this.saveData(this.settings);
+        const msg = `Subtitle Languages was "${was}" and is now "${parts[0]}": the track in the language a video is spoken in is kept by itself now.`;
+        this.log(msg);
+        new Notice(`ARCH YT Playlists: ${msg}`, 15000);
+      }
+    }
     // files-menu is the multi-select right-click; file-menu is the single one.
     this.registerEvent(
       this.app.workspace.on('files-menu', (menu, files) => {
@@ -500,12 +514,19 @@ module.exports = class YouTubeArchiver extends Plugin {
   purgeModuleCache() {
     let dir;
     try {
-      dir = path.join(this.pluginDir(), 'lib');
+      // Node caches a module under its real path, and TESTFIELD's plugin folder
+      // is a symlink into this repo, so the symlinked path never matched and an
+      // edited lib/ kept running after a reload. ARCH Recreations found both
+      // faults and fixed its copy; this is that fix (2026-10-09).
+      dir = fs.realpathSync(path.join(this.pluginDir(), 'lib'));
     } catch (_) {
       return;
     }
-    for (const key of Object.keys(require.cache || {})) {
-      if (key.startsWith(dir)) delete require.cache[key];
+    // The `require` a plugin is handed is Obsidian's wrapper, whose `.cache` is
+    // not Node's. Electron's own is `window.require.cache`.
+    const cache = (typeof window !== 'undefined' && window.require && window.require.cache) || require.cache || {};
+    for (const key of Object.keys(cache)) {
+      if (key.startsWith(dir)) delete cache[key];
     }
   }
 
@@ -1388,7 +1409,7 @@ module.exports = class YouTubeArchiver extends Plugin {
         }
         saved.push(...r.files);
         if (this.settings.downloadSubtitles && this.settings.keepOneSubtitle) {
-          this.pruneSubtitles(folder, rawStem);
+          this.pruneSubtitles(folder, rawStem, r.language);
         }
 
         if (mode === 'video_and_audio' && r.files.length) {
@@ -1407,12 +1428,14 @@ module.exports = class YouTubeArchiver extends Plugin {
           return { ok: true, reason: 'already downloaded' };
         }
         const out = path.join(folder, `${stem}.%(ext)s`);
+        const langFile = path.join(os.tmpdir(), `arch-yt-${Date.now()}.lang`);
         const r = await this.runYtDlp(
           [
             '--no-playlist', '--remote-components', 'ejs:github', '--skip-download', '--ignore-errors',
             '--write-auto-subs', '--write-subs',
             '--sub-langs', this.lib().subtitles.subLangsArg(this.settings),
             '--sub-format', 'vtt/best',
+            '--print-to-file', 'video:%(language)s', langFile,
             '-o', out, url,
           ],
           600000
@@ -1425,7 +1448,7 @@ module.exports = class YouTubeArchiver extends Plugin {
           return { ok: false, reason: 'subtitles failed' };
         }
         if (this.settings.keepOneSubtitle) {
-          const kept = this.pruneSubtitles(folder, rawStem);
+          const kept = this.pruneSubtitles(folder, rawStem, this.readLanguageFile(langFile));
           if (kept.length) files = kept;
         }
         notice.hide();
@@ -1502,8 +1525,10 @@ module.exports = class YouTubeArchiver extends Plugin {
     // failed download. A video that fails still exits non-zero, which is checked.
     const full = ['--no-playlist', '--remote-components', 'ejs:github', '--ignore-errors', ...args];
     const printFile = path.join(os.tmpdir(), `arch-yt-${Date.now()}.txt`);
+    // The video's language, for the subtitle rule (lib/subtitles.js).
+    const langFile = `${printFile}.lang`;
     const res = await this.runYtDlp(
-      [...full, '--no-simulate', '--print-to-file', 'after_move:filepath', printFile, url],
+      [...full, '--no-simulate', '--print-to-file', 'after_move:filepath', printFile, '--print-to-file', 'video:%(language)s', langFile, url],
       3600000
     ).catch((e) => ({ code: 1, stdout: '', stderr: String((e && e.message) || e) }));
 
@@ -1515,6 +1540,7 @@ module.exports = class YouTubeArchiver extends Plugin {
       /* nothing was written */
     }
     files = files.filter((f) => fs.existsSync(f));
+    const language = this.readLanguageFile(langFile);
 
     // yt-dlp skips a file that is already there, and after_move never fires, so
     // an empty print file does not mean the download failed. Treating it as a
@@ -1524,7 +1550,18 @@ module.exports = class YouTubeArchiver extends Plugin {
       files = this.filesNamed(folder, stem);
       if (files.length) this.log('print file was empty; matched on disk instead:', files.join(', '));
     }
-    return { ok: res.code === 0 && files.length > 0, files, stderr: res.stderr || '' };
+    return { ok: res.code === 0 && files.length > 0, files, language, stderr: res.stderr || '' };
+  }
+
+  // The language yt-dlp printed for the video, or '' when it printed none.
+  readLanguageFile(file) {
+    try {
+      const l = fs.readFileSync(file, 'utf8').split('\n').map((s) => s.trim()).filter(Boolean)[0] || '';
+      fs.unlinkSync(file);
+      return l;
+    } catch (_) {
+      return '';
+    }
   }
 
   // Files the output template could have produced: the stem, optionally with
@@ -1558,12 +1595,12 @@ module.exports = class YouTubeArchiver extends Plugin {
   }
 
   // yt-dlp writes one file per matched track: '--sub-langs en.*' alone brings
-  // en, en-US, en-orig and the rest, and the extra languages ('vi') bring an
-  // auto-translation on almost every video. The pattern stays broad so
-  // something always arrives; the surplus is removed here. What stays is the
-  // best main-language track, plus an extra language's track when the video is
-  // spoken in it (lib/subtitles.js). Returns the kept files.
-  pruneSubtitles(folder, stem) {
+  // en, en-US, en-orig and the rest, and '.*-orig' brings every track YouTube
+  // labels "Original". The pattern stays broad so something always arrives; the
+  // surplus is removed here. What stays is the best main-language track, plus
+  // the track in the language the video is spoken in (lib/subtitles.js), told
+  // by the video's `language`. Returns the kept files.
+  pruneSubtitles(folder, stem, language) {
     let entries = [];
     try {
       entries = fs.readdirSync(folder);
@@ -1578,7 +1615,7 @@ module.exports = class YouTubeArchiver extends Plugin {
       const m = name.match(shape);
       if (m) found.push({ name, lang: m[1], ext: m[2].toLowerCase() });
     }
-    const { keep } = this.lib().subtitles.pickSubtitles(found, this.settings);
+    const { keep } = this.lib().subtitles.pickSubtitles(found, this.settings, language);
     let removed = 0;
     for (const f of found) {
       if (keep.includes(f)) continue;
@@ -1650,13 +1687,62 @@ module.exports = class YouTubeArchiver extends Plugin {
     });
   }
 
+  // Tool paths are synced settings, and the Mac and the PC each fill them in with
+  // their own. On 2026-10-09 TESTFIELD held the PC's /home/... yt-dlp on the Mac, so
+  // every download there failed with ENOENT; iCanStudy held one too, and the plugin's
+  // bin/yt-dlp was a Linux program the PC had downloaded into the synced folder. So a
+  // saved path that is missing here, or is a program built for the other system, is
+  // passed over and the tool is found by name on this computer's PATH (buildEnv).
+  // Nothing is saved, so the two computers never overwrite each other's choice.
+  runsHere(file) {
+    let head;
+    try {
+      const fd = fs.openSync(file, 'r');
+      head = Buffer.alloc(4);
+      fs.readSync(fd, head, 0, 4, 0);
+      fs.closeSync(fd);
+    } catch (_) {
+      return false;
+    }
+    const hex = head.toString('hex');
+    if (hex === '7f454c46') return process.platform === 'linux';
+    if (['cffaedfe', 'feedfacf', 'cafebabe', 'feedface', 'cefaedfe'].includes(hex)) return process.platform === 'darwin';
+    if (hex.startsWith('4d5a')) return process.platform === 'win32';
+    return true; // a script, run by its own interpreter
+  }
+
+  localTool(saved, name) {
+    const p = String(saved || '').trim();
+    if (!p || !path.isAbsolute(p)) return p || name;
+    if (this.runsHere(p)) return p;
+    if (!this._toolWarned) this._toolWarned = new Set();
+    if (!this._toolWarned.has(p)) {
+      this._toolWarned.add(p);
+      this.log(`${name}: the saved path ${p} does not run on this computer; using ${name} from this computer's PATH`);
+    }
+    return name;
+  }
+
+  ytDlpBin() {
+    return this.localTool(this.settings.ytDlpPath, 'yt-dlp');
+  }
+
   buildFlags() {
     const flags = [];
     if (this.settings.cookiesFile) flags.push('--cookies', this.settings.cookiesFile);
     else if (this.settings.cookiesFromBrowser)
       flags.push('--cookies-from-browser', this.settings.cookiesFromBrowser);
-    if (this.settings.ffmpegLocation) flags.push('--ffmpeg-location', this.settings.ffmpegLocation);
-    if (this.settings.jsRuntime) flags.push('--js-runtime', this.settings.jsRuntime);
+    const ff = String(this.settings.ffmpegLocation || '').trim();
+    if (ff && this.localTool(path.join(ff, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'), 'ffmpeg') !== 'ffmpeg') {
+      flags.push('--ffmpeg-location', ff);
+    }
+    const rt = String(this.settings.jsRuntime || '').trim();
+    if (rt) {
+      const i = rt.indexOf(':');
+      const rtName = i > 0 ? rt.slice(0, i) : rt;
+      const rtPath = i > 0 ? rt.slice(i + 1) : '';
+      flags.push('--js-runtime', rtPath && this.localTool(rtPath, rtName) === rtName ? rtName : rt);
+    }
     const extra = String(this.settings.ytDlpExtraArgs || '').trim();
     if (extra) flags.push(...this.tokenize(extra));
     return flags;
@@ -1667,7 +1753,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     this.log('yt-dlp', full.join(' '));
     return new Promise((resolve, reject) => {
       const child = execFile(
-        this.settings.ytDlpPath || 'yt-dlp',
+        this.ytDlpBin(),
         full,
         {
           env: this.buildEnv(),
@@ -1809,7 +1895,7 @@ module.exports = class YouTubeArchiver extends Plugin {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'arch-cookies-'));
     const file = path.join(dir, 'cookies.txt');
     try {
-      const r = await this.runProcess(this.settings.ytDlpPath || 'yt-dlp', ['--cookies-from-browser', browser, '--cookies', file, '--quiet', '--no-warnings', 'ytsearch0:cookie-test'], 60000);
+      const r = await this.runProcess(this.ytDlpBin(), ['--cookies-from-browser', browser, '--cookies', file, '--quiet', '--no-warnings', 'ytsearch0:cookie-test'], 60000);
       if (!fs.existsSync(file)) {
         const err = (r.stderr || '').split('\n').map((l) => l.trim()).filter((l) => /ERROR/.test(l)).pop() || 'yt-dlp read no cookies';
         return { ok: false, error: err.replace(/^ERROR:\s*/, '') };
@@ -1928,7 +2014,7 @@ module.exports = class YouTubeArchiver extends Plugin {
 
   async updateYtDlp() {
     const n = this.notice('Updating yt-dlp…', 0);
-    const bin = this.settings.ytDlpPath || 'yt-dlp';
+    const bin = this.ytDlpBin();
     let r = await this.runProcess(bin, ['-U'], 180000).catch((e) => ({ code: 1, stdout: '', stderr: String(e.message) }));
     const all = r.stdout + r.stderr;
     if (r.code === 0 && !/ERROR/i.test(all)) { n.hide(); new Notice(all.trim().split('\n').slice(-1)[0] || 'Up to date.', 8000); return; }
@@ -1976,7 +2062,6 @@ module.exports = class YouTubeArchiver extends Plugin {
         'cookiesFile',
         'jsRuntime',
         'subtitleLangs',
-        'alsoSubtitleLangs',
       ]) {
         if (other[key]) {
           this.settings[key] = other[key];
@@ -2805,7 +2890,7 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Keep Only the Best Subtitles')
-      .setDesc('yt-dlp fetches every track matching the language patterns. This removes the extras, keeping the best track in the main language, plus one in an Also Keep language when the video is spoken in it.')
+      .setDesc('yt-dlp fetches every track matching the language pattern, and every "Original" track. This removes the extras, keeping the best track in the main language, plus the one in the language the video is spoken in.')
       .addToggle((t) =>
         t.setValue(s.keepOneSubtitle).onChange(async (v) => {
           s.keepOneSubtitle = v;
@@ -2927,24 +3012,14 @@ class YouTubeArchiverSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Subtitle Languages')
-      .setDesc('yt-dlp filter. "en.*" takes English including auto-generated.')
+      .setDesc(
+        'One language, as a yt-dlp filter. "en.*" takes English including auto-generated. ' +
+          'The track in the language the video is spoken in is always kept as well, whatever ' +
+          'the language, and the transcript is written in it.'
+      )
       .addText((t) =>
         t.setValue(s.subtitleLangs).onChange(async (v) => {
           s.subtitleLangs = v.trim() || 'en.*';
-          await this.save();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName('Also Keep Subtitles In')
-      .setDesc(
-        'Language codes, comma-separated. A track in one of these is kept when the video is ' +
-          'spoken in that language, and its transcript is written in it. YouTube\u2019s machine ' +
-          'translation into these languages is left out. Empty turns it off.'
-      )
-      .addText((t) =>
-        t.setValue(s.alsoSubtitleLangs || '').onChange(async (v) => {
-          s.alsoSubtitleLangs = v.trim();
           await this.save();
         })
       );
